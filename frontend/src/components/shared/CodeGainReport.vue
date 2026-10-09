@@ -59,7 +59,7 @@ function search() {
 }
 
 function goToPage(page) {
-  router.push({ path: route.path, query: { page } })
+  router.push({ path: route.path, query: { ...route.query, page } })
 }
 
 function copyBinanceId(binanceId) {

@@ -80,20 +80,20 @@ func directShareHandler(d *app.Deps) http.HandlerFunc {
 		startDate := r.URL.Query().Get("start_date")
 		endDate := r.URL.Query().Get("end_date")
 
-		dateWhere, dateArgs := reportsDateFilter("created_at", startDate, endDate)
+		dateWhere, dateArgs := reportsDateFilter("pp.created_at", startDate, endDate)
 
 		var companyPool models.NullFloat64
-		_ = d.DB.Get(&companyPool, "SELECT COALESCE(SUM(pool_amount),0) FROM package_pools WHERE user_id = 1"+dateWhere, dateArgs...)
+		_ = d.DB.Get(&companyPool, "SELECT COALESCE(SUM(pp.pool_amount),0) FROM package_pools pp WHERE pp.user_id = 1"+dateWhere, dateArgs...)
 
 		var salesPool models.NullFloat64
-		_ = d.DB.Get(&salesPool, "SELECT COALESCE(SUM(pool_amount),0) FROM package_pools WHERE user_id != 1"+dateWhere, dateArgs...)
+		_ = d.DB.Get(&salesPool, "SELECT COALESCE(SUM(pp.pool_amount),0) FROM package_pools pp WHERE pp.user_id != 1"+dateWhere, dateArgs...)
 
 		totalPool := companyPool.Float64 + salesPool.Float64
 
 		page, perPage, offset := httpx.PageParams(r, 20)
 
 		var total int
-		_ = d.DB.Get(&total, "SELECT COUNT(*) FROM package_pools WHERE 1=1"+dateWhere, dateArgs...)
+		_ = d.DB.Get(&total, "SELECT COUNT(*) FROM package_pools pp WHERE 1=1"+dateWhere, dateArgs...)
 
 		listArgs := append(append([]interface{}{}, dateArgs...), perPage, offset)
 		rows, err := d.DB.Queryx(`
@@ -103,7 +103,7 @@ func directShareHandler(d *app.Deps) http.HandlerFunc {
 			LEFT JOIN users u ON u.id = pp.user_id
 			LEFT JOIN packages p ON p.id = pp.package_id
 			WHERE 1=1`+dateWhere+`
-			ORDER BY pp.id DESC LIMIT ? OFFSET ?`, listArgs...)
+			ORDER BY pp.created_at DESC LIMIT ? OFFSET ?`, listArgs...)
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "Database error")
 			return

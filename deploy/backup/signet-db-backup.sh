@@ -11,6 +11,9 @@
 #   BACKUP_DIR               local copies, default /var/backups/signet
 #   BACKUP_KEEP_LOCAL_DAYS   default 3 (S3 retention is a lifecycle rule)
 #   BACKUP_IGNORE_TABLES     optional, comma-separated tables to skip
+#   BACKUP_UPLOAD            default true; false keeps the dump local only
+#                            (no AWS needed) — used for pre-deploy backups
+#   BACKUP_LABEL             optional tag in the file name, e.g. "predeploy"
 #
 # The dump is written locally first and only uploaded after it is
 # verified complete, so a failed mysqldump never lands in S3 as a
@@ -27,21 +30,25 @@ for v in DB_DATABASE DB_USERNAME; do
 done
 DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_PORT="${DB_PORT:-3306}"
-if [[ -z "${BACKUP_S3_URI:-}" ]]; then
-	[[ -n "${AWS_BUCKET:-}" ]] || die "set BACKUP_S3_URI or AWS_BUCKET"
+BACKUP_UPLOAD="${BACKUP_UPLOAD:-true}"
+if [[ "$BACKUP_UPLOAD" == true && -z "${BACKUP_S3_URI:-}" ]]; then
+	[[ -n "${AWS_BUCKET:-}" ]] || die "set BACKUP_S3_URI or AWS_BUCKET (or BACKUP_UPLOAD=false)"
 	BACKUP_S3_URI="s3://${AWS_BUCKET}/db-backups"
 fi
+BACKUP_S3_URI="${BACKUP_S3_URI:-}"
 BACKUP_S3_URI="${BACKUP_S3_URI%/}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/signet}"
 BACKUP_KEEP_LOCAL_DAYS="${BACKUP_KEEP_LOCAL_DAYS:-3}"
 
-for cmd in mysqldump gzip aws; do
+required=(mysqldump gzip)
+[[ "$BACKUP_UPLOAD" == true ]] && required+=(aws)
+for cmd in "${required[@]}"; do
 	command -v "$cmd" >/dev/null || die "$cmd not found in PATH ($PATH)"
 done
 
 mkdir -p "$BACKUP_DIR"
 stamp="$(date -u +%Y-%m-%dT%H%M%SZ)"
-name="${DB_DATABASE}_${stamp}.sql.gz"
+name="${DB_DATABASE}_${BACKUP_LABEL:+${BACKUP_LABEL}_}${stamp}.sql.gz"
 file="$BACKUP_DIR/$name"
 partial="$file.partial"
 
@@ -81,13 +88,18 @@ mv "$partial" "$file"
 size="$(stat -c %s "$file")"
 log "dump ok: $size bytes in $((SECONDS - start))s"
 
-dest="$BACKUP_S3_URI/$name"
-log "uploading → $dest"
-aws s3 cp "$file" "$dest" --only-show-errors --sse AES256
+dest="$file"
+if [[ "$BACKUP_UPLOAD" == true ]]; then
+	dest="$BACKUP_S3_URI/$name"
+	log "uploading → $dest"
+	aws s3 cp "$file" "$dest" --only-show-errors --sse AES256
 
-remote_size="$(aws s3 ls "$dest" | awk '{print $3}')"
-[[ "$remote_size" == "$size" ]] || die "uploaded size '${remote_size}' != local size '${size}'"
-log "upload verified ($remote_size bytes)"
+	remote_size="$(aws s3 ls "$dest" | awk '{print $3}')"
+	[[ "$remote_size" == "$size" ]] || die "uploaded size '${remote_size}' != local size '${size}'"
+	log "upload verified ($remote_size bytes)"
+else
+	log "upload skipped (BACKUP_UPLOAD=false)"
+fi
 
 find "$BACKUP_DIR" -maxdepth 1 -name "${DB_DATABASE}_*.sql.gz" -mtime +"$BACKUP_KEEP_LOCAL_DAYS" -print -delete |
 	sed 's/^/backup: removed old local copy /'

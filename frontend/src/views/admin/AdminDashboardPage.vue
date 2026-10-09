@@ -18,7 +18,12 @@ import FlashAlert from '@/components/shared/FlashAlert.vue'
 import { useRoleDashboard } from '@/composables/useRoleDashboard'
 import { useSignetDashboard } from '@/composables/useSignetDashboard'
 
-const { authStore, resp, loadError, onVacation, urlDisplay, fetchDashboard, toggleVacation, copyLink, needTokens, activate } = useRoleDashboard('/admin/dashboard')
+// Unlike the original admin view (fixed "Error updating package."), show the
+// server's reason — "Not enough tokens.", "Please top up your wallet." —
+// as the user and agent dashboards do.
+const { authStore, resp, loadError, onVacation, urlDisplay, fetchDashboard, toggleVacation, copyLink, needTokens, activate } = useRoleDashboard('/admin/dashboard', {
+  errorFromResponse: true,
+})
 useSignetDashboard(resp)
 
 const user = computed(() => authStore.user)

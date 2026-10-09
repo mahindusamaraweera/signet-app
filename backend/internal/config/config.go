@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+// The original app's clock is UTC (config/app.php 'timezone' => 'UTC'):
+// "today", "this month" and "last month" in reports and jobs are UTC
+// dates. Pin the process to UTC so a server set to Asia/Colombo can't
+// shift them. Every binary loads config before doing anything else.
+func init() {
+	time.Local = time.UTC
+}
+
 type Config struct {
 	AppName string
 	AppURL  string
@@ -124,9 +132,11 @@ func Load() *Config {
 }
 
 func (c *Config) MySQLDSN() string {
-	// parseTime=true so DATETIME/TIMESTAMP columns decode into time.Time;
-	// loc=Local matches PHP's date handling (no explicit UTC conversion in
-	// the original app).
+	// The original app runs in UTC (config/app.php 'timezone' => 'UTC'), so
+	// the session is pinned to UTC regardless of the server's own timezone:
+	// TIMESTAMP columns are read, compared and DATE()-ed in the session
+	// zone, and a server set to Asia/Colombo would otherwise shift every
+	// date filter by 5:30. loc=UTC makes Go read/write times the same way.
 	return c.DBUsername + ":" + c.DBPassword + "@tcp(" + c.DBHost + ":" + c.DBPort + ")/" + c.DBDatabase +
-		"?parseTime=true&loc=Local&charset=utf8mb4"
+		"?parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&charset=utf8mb4"
 }

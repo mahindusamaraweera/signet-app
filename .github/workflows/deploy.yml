@@ -1,0 +1,171 @@
+# Deploy — runs when a pull request into main is MERGED (a PR closed without
+# merging does nothing), or manually from the Actions tab. Setup, secrets and
+# rollback: docs/CICD.md.
+#
+#   check  → the full CI suite on the merged commit
+#   build  → Linux binaries (api + migrate) and the frontend, packed into one
+#            tarball; the server never compiles anything
+#   deploy → copy the tarball over SSH and run deploy/remote-deploy.sh
+#            (backup → migrate → swap backend → health check → swap frontend,
+#             automatic rollback if the health check fails)
+name: Deploy
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two deploys at once, and never cancel one half way.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  # The merged commit on main (or the branch head for a manual run).
+  DEPLOY_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
+jobs:
+  check:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
+  build:
+    name: Build release
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build backend
+        working-directory: backend
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          # Lightsail Linux instances are x86_64; set the repository variable
+          # DEPLOY_GOARCH=arm64 for an ARM server.
+          GOARCH: ${{ vars.DEPLOY_GOARCH || 'amd64' }}
+        run: |
+          go build -trimpath -ldflags="-s -w" -o ../release/signet-api ./cmd/api
+          go build -trimpath -ldflags="-s -w" -o ../release/migrate ./cmd/migrate
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          cp -r dist ../release/frontend
+
+      - name: Pack release
+        run: |
+          cp -r deploy release/deploy
+          echo "$DEPLOY_SHA" > release/REVISION
+          tar -czf "signet-${DEPLOY_SHA}.tar.gz" -C release .
+          ls -lh "signet-${DEPLOY_SHA}.tar.gz"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: signet-${{ env.DEPLOY_SHA }}.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to production
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: production
+      url: ${{ vars.DEPLOY_URL || (vars.APP_DOMAIN && format('https://{0}', vars.APP_DOMAIN)) || 'https://go.signetint.net' }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$KNOWN_HOSTS" ]; then
+            echo "::error::DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS secrets are required (see docs/CICD.md)"; exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # The server's host key is pinned — no "accept whatever answers".
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Check domain settings
+        env:
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          OLD_DOMAINS: ${{ vars.OLD_DOMAINS }}
+          CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
+        run: |
+          # These end up in a shell command on the server: only plain domain
+          # names and an e-mail address get through.
+          re='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
+          if [ -n "$APP_DOMAIN" ] && ! [[ "$APP_DOMAIN" =~ $re ]]; then
+            echo "::error::APP_DOMAIN '$APP_DOMAIN' is not a valid lowercase domain name"; exit 1
+          fi
+          for d in ${OLD_DOMAINS//,/ }; do
+            [[ "$d" =~ $re ]] || { echo "::error::OLD_DOMAINS entry '$d' is not a valid lowercase domain name"; exit 1; }
+          done
+          if [ -n "$CERTBOT_EMAIL" ] && ! [[ "$CERTBOT_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+            echo "::error::CERTBOT_EMAIL is not a valid e-mail address"; exit 1
+          fi
+          if [ -n "$OLD_DOMAINS" ] && [ -z "$APP_DOMAIN" ]; then
+            echo "::error::OLD_DOMAINS needs APP_DOMAIN"; exit 1
+          fi
+          echo "domain: ${APP_DOMAIN:-(not managed, APP_DOMAIN unset)}"
+
+      - name: Upload and install
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          OLD_DOMAINS: ${{ vars.OLD_DOMAINS }}
+          CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
+        run: |
+          tarball="signet-${DEPLOY_SHA}.tar.gz"
+          common=(-i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20)
+          scp "${common[@]}" -P "$SSH_PORT" "$tarball" "$SSH_USER@$HOST:/tmp/$tarball"
+          # Pull the deploy script out of the tarball and run it as root.
+          ssh "${common[@]}" -p "$SSH_PORT" "$SSH_USER@$HOST" "set -e
+            tmp=\$(mktemp -d)
+            tar -xzf /tmp/$tarball -C \"\$tmp\" ./deploy/remote-deploy.sh
+            sudo APP_DOMAIN='$APP_DOMAIN' OLD_DOMAINS='$OLD_DOMAINS' CERTBOT_EMAIL='$CERTBOT_EMAIL' \
+              bash \"\$tmp/deploy/remote-deploy.sh\" /tmp/$tarball
+            rm -rf \"\$tmp\""
+
+      - name: Public health check
+        env:
+          URL: ${{ vars.DEPLOY_URL || (vars.APP_DOMAIN && format('https://{0}', vars.APP_DOMAIN)) || 'https://go.signetint.net' }}
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS --max-time 5 "$URL/api/v1/health" | grep -q '"ok"'; then
+              echo "✓ $URL is healthy (commit $DEPLOY_SHA)"; exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::$URL/api/v1/health did not answer ok"; exit 1

@@ -21,8 +21,6 @@ try {
 } catch {
   parent.value = null
 }
-
-const whatsappDigits = computed(() => (parent.value?.whatsapp_number || '').replace(/[^\d+]/g, ''))
 </script>
 
 <template>

@@ -54,7 +54,7 @@ function applyFilter() {
 }
 
 function goToPage(page) {
-  router.push({ path: route.path, query: { page } })
+  router.push({ path: route.path, query: { ...route.query, page } })
 }
 
 const perWeekTotal = computed(() => Number(weeklySummary.value?.per_week_total || 0))

@@ -77,6 +77,29 @@ func parseUintParam(s string) (uint64, bool) {
 	return v, true
 }
 
+// flexString decodes a JSON string or number into a string, the way
+// Laravel's $request->input() accepts either (`"812"` and `812` both give
+// "812"). A plain Go string field rejects a number and stays empty.
+type flexString string
+
+func (f *flexString) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		*f = ""
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*f = flexString(s)
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	*f = flexString(n.String())
+	return nil
+}
+
 func decodeJSON(r *http.Request, dst interface{}) error {
 	defer r.Body.Close()
 	dec := json.NewDecoder(r.Body)

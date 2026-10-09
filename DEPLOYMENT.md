@@ -206,6 +206,11 @@ images and restoring a backup, see [docs/S3_SETUP.md](docs/S3_SETUP.md).
 
 ## 6. Updating a deployment
 
+Merging a pull request into `main` deploys automatically through GitHub
+Actions (backup, migrations, health check, automatic rollback). See
+[docs/CICD.md](docs/CICD.md) for setup. The manual steps below are the
+fallback.
+
 ```bash
 # Backend
 cd backend

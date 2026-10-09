@@ -10,6 +10,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -169,15 +171,26 @@ func viewTokensHandler(d *app.Deps) http.HandlerFunc {
 func activePackageHandler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			PackageID string `json:"package_id"`
+			PackageID flexString `json:"package_id"`
 		}
 		_ = decodeJSON(r, &body) // not validated in the original either — see api_spec.md
 
 		actingUser := auth.UserFromContext(r.Context())
 
+		// Every refusal is logged with its reason, so a failed activation can
+		// be explained from `journalctl -u signet-api` after the fact.
+		refuse := func(status int, message string, detail string) {
+			log.Printf("active-package: refused user_package=%s by user=%d: %s %s", body.PackageID, actingUser.ID, message, detail)
+			httpx.JSON(w, status, map[string]interface{}{"message": message})
+		}
+		fail := func(message string, err error) {
+			log.Printf("active-package: FAILED user_package=%s by user=%d: %s: %v", body.PackageID, actingUser.ID, message, err)
+			httpx.Error(w, http.StatusInternalServerError, message)
+		}
+
 		tx, err := d.DB.Beginx()
 		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Database error")
+			fail("Database error", err)
 			return
 		}
 		defer tx.Rollback()
@@ -197,33 +210,34 @@ func activePackageHandler(d *app.Deps) http.HandlerFunc {
 			FROM user_packages up JOIN packages p ON p.id = CAST(up.package AS UNSIGNED)
 			WHERE up.id = ? FOR UPDATE`, body.PackageID)
 		if err == sql.ErrNoRows {
-			httpx.JSON(w, http.StatusNotFound, map[string]interface{}{"message": "Package not found."})
+			refuse(http.StatusNotFound, "Package not found.", "(no such user_packages row, or its package was deleted)")
 			return
 		}
 		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Database error")
+			fail("Database error", err)
 			return
 		}
 
 		if actingUser.ID == 1 {
 			if err := processPackageActivationCompany(tx, &pkg); err != nil {
-				httpx.Error(w, http.StatusInternalServerError, "Could not activate package: "+err.Error())
+				fail("Could not activate package: "+err.Error(), err)
 				return
 			}
 		} else {
 			totalValue, err := activePackagesCapValueTx(tx, actingUser.ID)
 			if err != nil {
-				httpx.Error(w, http.StatusInternalServerError, "Database error")
+				fail("Database error", err)
 				return
 			}
 			var walletBalance models.NullFloat64
 			werr := tx.Get(&walletBalance, "SELECT balance FROM wallets WHERE user_id = ?", actingUser.ID)
 			if werr != nil && werr != sql.ErrNoRows {
-				httpx.Error(w, http.StatusInternalServerError, "Database error")
+				fail("Database error", werr)
 				return
 			}
 			if totalValue < walletBalance.Float64 {
-				httpx.JSON(w, http.StatusBadRequest, map[string]interface{}{"message": "Please top up your wallet."})
+				refuse(http.StatusBadRequest, "Please top up your wallet.",
+					fmt.Sprintf("(wallet balance %.2f is above the 4x cap %.2f of the activator's active packages)", walletBalance.Float64, totalValue))
 				return
 			}
 
@@ -237,7 +251,8 @@ func activePackageHandler(d *app.Deps) http.HandlerFunc {
 			var tokensCount int64
 			_ = tx.Get(&tokensCount, "SELECT COUNT(*) FROM tokens WHERE user_id = ? AND status = 'active'", actingUser.ID)
 			if tokensCount < needTokens {
-				httpx.JSON(w, http.StatusBadRequest, map[string]interface{}{"message": "Not enough tokens."})
+				refuse(http.StatusBadRequest, "Not enough tokens.",
+					fmt.Sprintf("(has %d active tokens, needs %d = price %d minus %d%% commission)", tokensCount, needTokens, pkg.PackagePrice, feePercentage))
 				return
 			}
 
@@ -249,32 +264,35 @@ func activePackageHandler(d *app.Deps) http.HandlerFunc {
 			// matching the original which also issues checkWalet() as
 			// independent queries rather than inside the same transaction.
 			if err != nil {
-				httpx.Error(w, http.StatusInternalServerError, "Database error")
+				fail("Database error", err)
 				return
 			}
 			if checkActivation != 1 {
-				httpx.JSON(w, http.StatusBadRequest, map[string]interface{}{"message": "Not enough wallet."})
+				refuse(http.StatusBadRequest, "Not enough wallet.",
+					fmt.Sprintf("(wallet + this commission would exceed the activator's 4x cap of %.2f)", totalValue))
 				return
 			}
 
 			if err := processPackageActivation(tx, &pkg, actingUser.ID, needTokens, feePercentage); err != nil {
 				if errors.Is(err, errNoUserParent) {
-					httpx.JSON(w, http.StatusNotFound, map[string]interface{}{"message": "User-parent relationship not found."})
+					refuse(http.StatusNotFound, "User-parent relationship not found.",
+						fmt.Sprintf("(user %d has no user_parents row — registration step 2 never placed them in the tree)", pkg.UserID))
 					return
 				}
-				httpx.Error(w, http.StatusInternalServerError, "Could not activate package: "+err.Error())
+				fail("Could not activate package: "+err.Error(), err)
 				return
 			}
 			if err := deactivateTokens(tx, actingUser.ID, needTokens); err != nil {
-				httpx.Error(w, http.StatusInternalServerError, "Could not deactivate tokens: "+err.Error())
+				fail("Could not deactivate tokens: "+err.Error(), err)
 				return
 			}
 		}
 
 		if err := tx.Commit(); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Database error")
+			fail("Database error", err)
 			return
 		}
+		log.Printf("active-package: activated user_package=%s (user %d) by user=%d", body.PackageID, pkg.UserID, actingUser.ID)
 		httpx.OK(w, map[string]interface{}{"message": "Package and wallet updated successfully."})
 	}
 }
@@ -328,10 +346,7 @@ func processPackageActivation(tx *sqlx.Tx, pkg *activatingPackage, actingUserID 
 		return err
 	}
 
-	activatedAt := time.Now()
-	if loc, err := time.LoadLocation("Asia/Colombo"); err == nil {
-		activatedAt = time.Now().In(loc)
-	}
+	activatedAt := colomboWallClock()
 	if _, err := tx.Exec("UPDATE user_packages SET status='active', activated_at=? , updated_at=NOW() WHERE id=?", activatedAt, pkg.ID); err != nil {
 		return err
 	}
@@ -419,10 +434,7 @@ func processPackageActivationCompany(tx *sqlx.Tx, pkg *activatingPackage) error 
 	if _, err := tx.Exec("UPDATE user_parents SET node='active', updated_at=NOW() WHERE id=?", findUser.ID); err != nil {
 		return err
 	}
-	activatedAt := time.Now()
-	if loc, err := time.LoadLocation("Asia/Colombo"); err == nil {
-		activatedAt = time.Now().In(loc)
-	}
+	activatedAt := colomboWallClock()
 	if _, err := tx.Exec("UPDATE user_packages SET status='active', activated_at=?, updated_at=NOW() WHERE id=?", activatedAt, pkg.ID); err != nil {
 		return err
 	}
@@ -707,4 +719,17 @@ func atofF(s string) float64 {
 		return 0
 	}
 	return f
+}
+
+// colomboWallClock reproduces how the original stored activated_at:
+// Carbon::now('Asia/Colombo') written through a UTC connection, i.e. the
+// Sri Lanka wall-clock time stored as if it were UTC. Weekly ROC selects
+// packages by activated_at, so new rows must follow the same convention as
+// the existing ones.
+func colomboWallClock() time.Time {
+	now := time.Now()
+	if loc, err := time.LoadLocation("Asia/Colombo"); err == nil {
+		now = now.In(loc)
+	}
+	return time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second(), 0, time.UTC)
 }
