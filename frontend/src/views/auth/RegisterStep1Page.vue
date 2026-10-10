@@ -18,6 +18,7 @@ const leaders = ref([])
 const submitting = ref(false)
 const errors = ref({})
 const formError = ref('')
+const blockchainEnabled = ref(false)
 
 const form = reactive({
   referral_code: '',
@@ -259,7 +260,12 @@ onMounted(async () => {
   form.referral_code = route.query.ref || ''
   try {
     const { data } = await api.get('/register/referral', { params: { ref: form.referral_code } })
-    if (data.status === 'success') {
+    if (data.status === 'verification_required') {
+      form.password = ''
+      form.password_confirmation = ''
+      await Swal.fire({ icon: 'info', title: 'Verify your email', text: data.message || 'Check your inbox for the verification link. Your account is created only after verification.' })
+    } else if (data.status === 'success') {
+      blockchainEnabled.value = !!data.blockchain_enabled
       countries.value = data.countries || []
       leaders.value = data.leaders || []
     } else {
@@ -419,7 +425,7 @@ async function onSubmit() {
                 <div class="mb-4">
                   <h2 class="h6 fw-bold text-uppercase text-muted mb-3" style="letter-spacing: .05em; font-size: .75rem">Payment &amp; security</h2>
                   <div class="row g-3">
-                    <div class="col-12">
+                    <div v-if="!blockchainEnabled" class="col-12">
                       <label for="binance_pay_id" class="form-label small fw-semibold">Binance Pay ID</label>
                       <input id="binance_pay_id" v-model="form.binance_pay_id" type="text" class="form-control" :class="{ 'is-invalid': errors.binance_pay_id }" required />
                       <div v-if="errors.binance_pay_id" class="invalid-feedback">{{ errors.binance_pay_id[0] }}</div>

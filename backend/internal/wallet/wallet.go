@@ -26,6 +26,14 @@ var packageMultipliers = map[int64]float64{
 // Balance returns a user's wallets.balance, or 0 if they have no wallet row
 // yet (walletBalance() in the original helpers.php).
 func Balance(db *sqlx.DB, userID uint64) (float64, error) {
+	return balanceFrom(db, userID)
+}
+
+type capReader interface {
+	Get(dest interface{}, query string, args ...interface{}) error
+}
+
+func balanceFrom(db capReader, userID uint64) (float64, error) {
 	var balance sql.NullFloat64
 	err := db.Get(&balance, "SELECT balance FROM wallets WHERE user_id = ?", userID)
 	if err == sql.ErrNoRows {
@@ -42,6 +50,10 @@ func Balance(db *sqlx.DB, userID uint64) (float64, error) {
 // wallet engine (WalletService.updateWallet's totalValue, checkWalet's
 // totalValue, TokenController's totalValue in activePackage).
 func activePackagesCapValue(db *sqlx.DB, userID uint64) (float64, error) {
+	return activePackagesCapFrom(db, userID)
+}
+
+func activePackagesCapFrom(db capReader, userID uint64) (float64, error) {
 	var total sql.NullFloat64
 	err := db.Get(&total, `
 		SELECT COALESCE(SUM(p.price * 4), 0)
@@ -58,11 +70,22 @@ func activePackagesCapValue(db *sqlx.DB, userID uint64) (float64, error) {
 // this user with the commission on packageID would NOT exceed their 4x cap,
 // 0 otherwise. See financial_engine.md §2.
 func CheckWallet(db *sqlx.DB, userID, packageID uint64) (int, error) {
-	totalValue, err := activePackagesCapValue(db, userID)
+	return checkWalletFrom(db, userID, packageID)
+}
+
+// CheckWalletTx preserves the legacy query policy inside an existing transaction.
+// The caller must coordinate beneficiary locks/reservations; this read alone is
+// not an authorization for an asynchronous treasury payment.
+func CheckWalletTx(tx *sqlx.Tx, userID, packageID uint64) (int, error) {
+	return checkWalletFrom(tx, userID, packageID)
+}
+
+func checkWalletFrom(db capReader, userID, packageID uint64) (int, error) {
+	totalValue, err := activePackagesCapFrom(db, userID)
 	if err != nil {
 		return 0, err
 	}
-	parentWallet, err := Balance(db, userID)
+	parentWallet, err := balanceFrom(db, userID)
 	if err != nil {
 		return 0, err
 	}
@@ -83,12 +106,16 @@ func CheckWallet(db *sqlx.DB, userID, packageID uint64) (int, error) {
 	}
 
 	commission := packagePrice.Float64 * (float64(feePercentage.Int64) / 100)
-	predictedValue := parentWallet + commission
-
-	if predictedValue > totalValue {
+	if !CommissionFitsCap(parentWallet, commission, totalValue) {
 		return 0, nil
 	}
 	return 1, nil
+}
+
+// CommissionFitsCap preserves the legacy predictive check, including equality.
+// USD values remain the basis; SIGNET market conversion does not affect this test.
+func CommissionFitsCap(balance, commission, cap float64) bool {
+	return !(balance+commission > cap)
 }
 
 // bootstrapGlobalShareWallet creates a global_share_wallets row for userID
@@ -192,6 +219,9 @@ func creditWallet(db *sqlx.DB, userID uint64, amount float64, description string
 		return err
 	}
 	defer tx.Rollback()
+	if err := EnsureNoPendingCommissions(tx, userID); err != nil {
+		return err
+	}
 
 	var walletID sql.NullInt64
 	err = tx.Get(&walletID, "SELECT id FROM wallets WHERE user_id = ?", userID)
@@ -325,6 +355,9 @@ func TokenShare(db *sqlx.DB, packageID, virtualParent uint64) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := EnsureNoPendingCommissions(tx, virtualParent); err != nil {
+		return err
+	}
 
 	var ids []uint64
 	if err := tx.Select(&ids, `SELECT id FROM tokens WHERE user_id = 1 AND status = 'active' ORDER BY id ASC LIMIT ?`, bonusTokens); err != nil {

@@ -55,16 +55,23 @@ func CheckPassword(hash, plain string) bool {
 // --- Session JWT (web guard equivalent) ---
 
 type sessionClaims struct {
-	UserID uint64 `json:"uid"`
-	Role   string `json:"role"`
+	UserID            uint64 `json:"uid"`
+	Role              string `json:"role"`
+	CredentialVersion string `json:"cv"`
 	jwt.RegisteredClaims
 }
 
 func (s *Service) IssueSession(w http.ResponseWriter, user *models.User) error {
+	loginID := make([]byte, 32)
+	if _, err := rand.Read(loginID); err != nil {
+		return err
+	}
 	claims := sessionClaims{
-		UserID: user.ID,
-		Role:   user.Role,
+		UserID:            user.ID,
+		Role:              user.Role,
+		CredentialVersion: s.credentialVersion(user),
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        hex.EncodeToString(loginID),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.Lifetime)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
@@ -126,7 +133,7 @@ func (s *Service) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 		var user models.User
-		if err := s.DB.Get(&user, "SELECT * FROM users WHERE id = ?", claims.UserID); err != nil {
+		if err := s.DB.Get(&user, "SELECT * FROM users WHERE id = ?", claims.UserID); err != nil || !s.sessionMatches(claims, &user) {
 			http.Error(w, `{"message":"Unauthenticated."}`, http.StatusUnauthorized)
 			return
 		}
@@ -143,7 +150,7 @@ func (s *Service) OptionalAuth(next http.Handler) http.Handler {
 		claims, err := s.parseSession(r)
 		if err == nil {
 			var user models.User
-			if dberr := s.DB.Get(&user, "SELECT * FROM users WHERE id = ?", claims.UserID); dberr == nil {
+			if dberr := s.DB.Get(&user, "SELECT * FROM users WHERE id = ?", claims.UserID); dberr == nil && s.sessionMatches(claims, &user) {
 				ctx := context.WithValue(r.Context(), userCtxKey, &user)
 				r = r.WithContext(ctx)
 			}

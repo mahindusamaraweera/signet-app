@@ -74,6 +74,11 @@ const items = computed(() => {
     )
   }
   if (r !== 'company') list.push({ to: '/my-geneology', label: 'Geneology', icon: GRID, wrap: true })
+  list.push({ to: '/wallet/deposits', label: 'Deposit Wallet', icon: GRID, wrap: true })
+  list.push({ to: '/wallet/security', label: 'Withdrawal Security', icon: GRID, wrap: true })
+  list.push({ to: '/wallet/withdraw', label: 'Withdraw SIGNET', icon: GRID, wrap: true })
+	list.push({ to: '/wallet/vesting', label: 'SIGNET Vesting', icon: GRID, wrap: true })
+	if (r === 'company' || r === 'admin') list.push({ to: '/admin/vesting', label: 'Manage Vesting', icon: GRID, wrap: true })
   list.push({ to: r !== 'company' ? '/kyc/show' : '/kyc', label: 'KYC', icon: GRID, wrap: true })
   return list
 })

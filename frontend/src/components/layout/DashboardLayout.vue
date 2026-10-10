@@ -9,12 +9,14 @@
 // expects: one .content element offset from the fixed .sidebar).
 import Sidebar from './Sidebar.vue'
 import Topbar from './Topbar.vue'
+import IncomeCapAlert from './IncomeCapAlert.vue'
 </script>
 
 <template>
   <Sidebar />
   <main class="content">
     <Topbar />
+    <IncomeCapAlert />
     <slot />
   </main>
 </template>
