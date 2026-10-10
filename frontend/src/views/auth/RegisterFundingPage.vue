@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import api from '@/api/client'
 import AuthCardLayout from '@/components/layout/AuthCardLayout.vue'
 import QRCode from 'qrcode'
+import PartialDepositReminder from '@/components/PartialDepositReminder.vue'
 
 const wallet = ref(null)
 const purchase = ref(null)
@@ -36,6 +37,7 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
 
 <template>
   <AuthCardLayout back-text="Back to login" back-to="/login">
+    <PartialDepositReminder :purchase="purchase" />
     <h1 class="h3 mb-3">Fund your package</h1>
     <p v-if="error" class="alert alert-warning" role="alert">{{ error }}</p>
     <template v-if="wallet">
@@ -63,7 +65,7 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
       <div v-else-if="purchase.status === 'awaiting_cap_review'" class="alert alert-warning" role="status">
         Funding is confirmed, but activation is held for a team income-cap check. Your funds and financial history are preserved. Do not deposit again for this hold; contact support.
       </div>
-      <div v-else-if="purchase.status === 'expired'" class="alert alert-warning">Your unpaid placement expired. Your account remains available. Please contact support before sending funds for this package.</div>
+      <div v-else-if="purchase.status === 'expired'" class="alert alert-warning">This purchase has expired. Do not send funds to its old deposit address. Contact support if you already sent a payment.</div>
       <div v-else class="alert alert-info" role="status">Your package is processing automatically: {{ purchase.status }}. No further purchase action is needed.</div>
     </template>
     <RouterLink v-if="purchase?.status === 'completed'" to="/login" class="btn btn-primary">Continue to login</RouterLink>

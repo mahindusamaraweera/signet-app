@@ -118,3 +118,25 @@ func TestEmbeddedMigrations(t *testing.T) {
 		t.Fatalf("001 defines %d tables %v, want 34 including password_reset", len(tables), tables)
 	}
 }
+
+func TestNewRegistrationExpiryMigrationNeverEnrollsOrMutatesExistingUsers(t *testing.T) {
+	content, err := migrations.FS.ReadFile("030_new_registration_expiry.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements, err := SplitStatements(string(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statements) != 2 {
+		t.Fatalf("unexpected statements: %d", len(statements))
+	}
+	for _, statement := range statements {
+		if !strings.HasPrefix(statement, "CREATE TABLE IF NOT EXISTS registration_") {
+			t.Fatalf("expiry migration must only create empty audit/enrollment tables: %s", statement)
+		}
+		if strings.Contains(statement, "REFERENCES users") {
+			t.Fatal("expiry evidence must survive account deletion")
+		}
+	}
+}

@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import api from '@/api/client'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
 import QRCode from 'qrcode'
+import PartialDepositReminder from '@/components/PartialDepositReminder.vue'
 
 const wallet = ref(null)
 const qr = ref('')
@@ -80,6 +81,7 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
 
 <template>
   <DashboardLayout>
+    <PartialDepositReminder :purchase="purchase" />
     <h1 class="h3">My deposit wallet</h1>
     <p>This wallet belongs to your existing account. Provisioning it does not buy a package, restart vesting or change your income cap.</p>
     <p v-if="error" class="alert alert-warning" role="alert">{{ error }}</p>

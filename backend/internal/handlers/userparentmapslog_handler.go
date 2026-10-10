@@ -114,7 +114,7 @@ func userParentLogsIndexHandler(d *app.Deps) http.HandlerFunc {
 func userParentLogsDestroyHandler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if d.Cfg.RegistrationExpiryEnabled || d.Cfg.BlockchainEnabled {
-			httpx.Error(w, http.StatusConflict, "Account deletion is disabled for automated or blockchain registrations; placement expiry preserves financial history")
+			httpx.Error(w, http.StatusConflict, "Manual account deletion is disabled; automatic expiry applies only to newly registered, unpaid accounts with financial clearance")
 			return
 		}
 		const genericErr = "Something went wrong while deleting records. No changes were saved."

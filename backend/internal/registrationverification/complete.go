@@ -126,6 +126,11 @@ func (s *Service) Complete(ctx context.Context, id, token string, now time.Time)
 	if err != nil || userID <= 0 {
 		return 0, errors.New("account identity unavailable")
 	}
+	// Deliberately enroll only brand-new verified registrations. Existing users
+	// are never backfilled into automatic account deletion.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO registration_expiry_enrollments (user_id,policy_version,registered_at) VALUES (?,'new_unpaid_v1',?)`, userID, now.UTC()); err != nil {
+		return 0, err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO wallets (user_id,balance,created_at,updated_at) VALUES (?,0,?,?)`, userID, now.UTC(), now.UTC()); err != nil {
 		return 0, err
 	}

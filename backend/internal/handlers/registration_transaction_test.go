@@ -17,7 +17,7 @@ type registrationTestMailer struct{}
 func (registrationTestMailer) Send(context.Context, string, string, string) error { return nil }
 
 func TestVerifiedRegistrationTransactionBoundaries(t *testing.T) {
-	for _, scenario := range []string{"success", "invalid token", "expired", "wallet failure", "consumption failure"} {
+	for _, scenario := range []string{"success", "invalid token", "expired", "enrollment failure", "wallet failure", "consumption failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			key := []byte(strings.Repeat("k", 32))
 			now := time.Unix(1800000000, 0)
@@ -47,8 +47,11 @@ func TestVerifiedRegistrationTransactionBoundaries(t *testing.T) {
 					commissionSQLStep{contains: "SELECT user_id FROM referral_codes", columns: []string{"user_id"}, values: []driver.Value{int64(7)}},
 					commissionSQLStep{contains: "SELECT COUNT(*) FROM countries", columns: []string{"count"}, values: []driver.Value{int64(1)}},
 					commissionSQLStep{contains: "INSERT INTO users", insertID: 42},
+					commissionSQLStep{contains: "INSERT INTO registration_expiry_enrollments", args: []driver.Value{int64(42), now.UTC()}},
 				)
-				if scenario == "wallet failure" {
+				if scenario == "enrollment failure" {
+					fixture.steps[len(fixture.steps)-1].err = errors.New("expiry enrollment failed")
+				} else if scenario == "wallet failure" {
 					fixture.steps = append(fixture.steps, commissionSQLStep{contains: "INSERT INTO wallets", err: errors.New("wallet write failed")})
 				} else {
 					fixture.steps = append(fixture.steps,
