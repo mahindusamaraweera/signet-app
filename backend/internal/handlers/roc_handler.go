@@ -79,6 +79,10 @@ func rocIncomeHandler(d *app.Deps) http.HandlerFunc {
 // `$this->walletService->updateWallet($roc->user_id, $roc->amount,
 // $roc->description)` exactly, including computing the idempotency guard
 // (shouldCreditWallet) BEFORE mutating roc.Status, same as the original.
+// rocWalletCreditDescription labels the earn_logs line written when an admin
+// approves a ROC and it is credited to the wallet.
+const rocWalletCreditDescription = "ROC Income → credited to wallet"
+
 func rocUpdateStatusHandler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -124,7 +128,10 @@ func rocUpdateStatusHandler(d *app.Deps) http.HandlerFunc {
 		}
 
 		if shouldCreditWallet {
-			if err := wallet.UpdateWallet(d.DB, roc.UserID, roc.Amount, roc.Description); err != nil {
+			// The original reused roc.Description ("ROC Income") here, so the
+			// wallet credit looked like a second weekly ROC in the user's earn
+			// log. Label it as what it is: the approved ROC moving to the wallet.
+			if err := wallet.UpdateWallet(d.DB, roc.UserID, roc.Amount, rocWalletCreditDescription); err != nil {
 				httpx.Error(w, http.StatusInternalServerError, "Could not credit wallet: "+err.Error())
 				return
 			}

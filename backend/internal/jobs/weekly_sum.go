@@ -22,6 +22,16 @@ import (
 )
 
 func RunWeeklySum(db *sqlx.DB) error {
+	// One transaction for the whole week: the already-paid check, every
+	// credit and log row, and the summary row that marks the week paid.
+	// Any failure rolls all of it back, so a week can never be half paid
+	// and then paid again by the next daily check.
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	now := time.Now()
 	isoWeekday := int(now.Weekday())
 	if isoWeekday == 0 {
@@ -36,7 +46,7 @@ func RunWeeklySum(db *sqlx.DB) error {
 	weekEndStr := weekEnd.Format("2006-01-02")
 
 	var alreadyProcessed int
-	if err := db.Get(&alreadyProcessed, "SELECT COUNT(*) FROM weekly_package_summaries WHERE week_start = ?", weekStartStr); err != nil {
+	if err := tx.Get(&alreadyProcessed, "SELECT COUNT(*) FROM weekly_package_summaries WHERE DATE(week_start) = ? FOR UPDATE", weekStartStr); err != nil {
 		return err
 	}
 	if alreadyProcessed > 0 {
@@ -44,7 +54,7 @@ func RunWeeklySum(db *sqlx.DB) error {
 	}
 
 	var weekTotal sql.NullFloat64
-	if err := db.Get(&weekTotal, `
+	if err := tx.Get(&weekTotal, `
 		SELECT COALESCE(SUM(p.price), 0)
 		FROM user_packages up JOIN packages p ON p.id = CAST(up.package AS UNSIGNED)
 		WHERE up.status = 'active' AND up.activated_at BETWEEN ? AND ?`, weekStart, weekEnd); err != nil {
@@ -68,7 +78,7 @@ func RunWeeklySum(db *sqlx.DB) error {
 		RocBalance float64 `db:"roc_balance"`
 	}
 	var activeRoc []rocUser
-	if err := db.Select(&activeRoc, `
+	if err := tx.Select(&activeRoc, `
 		SELECT u.id, COALESCE(w.roc_balance, 0) AS roc_balance
 		FROM users u LEFT JOIN wallets w ON w.user_id = u.id
 		WHERE u.roc_status = 'active'`); err != nil {
@@ -81,19 +91,19 @@ func RunWeeklySum(db *sqlx.DB) error {
 	}
 
 	var remainingBalance float64
+	paid := 0
 	for _, u := range activeRoc {
 		var pkg struct {
 			Price int64 `db:"price"`
 		}
-		err := db.Get(&pkg, `
+		err := tx.Get(&pkg, `
 			SELECT p.price FROM user_packages up JOIN packages p ON p.id = CAST(up.package AS UNSIGNED)
 			WHERE up.user_id = ? AND up.status = 'active' ORDER BY up.id ASC LIMIT 1`, u.ID) // ->first(): lowest id, as the original
 		if err == sql.ErrNoRows {
 			continue // skip user if no active package
 		}
 		if err != nil {
-			log.Printf("jobs: packages:weekly-sum: could not load active package for user %d: %v", u.ID, err)
-			continue
+			return fmt.Errorf("week %s: load active package for user %d: %w (nothing was paid)", weekStartStr, u.ID, err)
 		}
 
 		var maxPayout float64
@@ -109,8 +119,8 @@ func RunWeeklySum(db *sqlx.DB) error {
 		}
 
 		if u.RocBalance >= float64(pkg.Price)*5 {
-			if _, err := db.Exec("UPDATE users SET roc_status = 'stopped', updated_at = NOW() WHERE id = ?", u.ID); err != nil {
-				log.Printf("jobs: packages:weekly-sum: could not stop roc_status for user %d: %v", u.ID, err)
+			if _, err := tx.Exec("UPDATE users SET roc_status = 'stopped', updated_at = NOW() WHERE id = ?", u.ID); err != nil {
+				return fmt.Errorf("week %s: stop roc_status for user %d: %w (nothing was paid)", weekStartStr, u.ID, err)
 			}
 			continue // lifetime 5x package-price ROC cap reached, no payout this run
 		}
@@ -126,23 +136,30 @@ func RunWeeklySum(db *sqlx.DB) error {
 		// Credits wallets.roc_balance DIRECTLY via raw SQL, NOT through
 		// wallet.UpdateWallet — ROC is a separate ledger from wallet.balance
 		// and is not subject to the 4x earnings cap gate (financial_engine.md §5).
-		if err := weeklySumCreditRoc(db, u.ID, payout); err != nil {
-			log.Printf("jobs: packages:weekly-sum: could not credit roc_balance for user %d: %v", u.ID, err)
-			continue
+		// Any failure aborts the whole week (rolled back, retried on the next
+		// daily check) rather than skipping one user and marking it paid.
+		if err := weeklySumCreditRoc(tx, u.ID, payout); err != nil {
+			return fmt.Errorf("week %s: credit roc_balance for user %d: %w (nothing was paid)", weekStartStr, u.ID, err)
 		}
-
-		if err := weeklySumStoreEarnLog(db, u.ID, payout, jobID); err != nil {
-			log.Printf("jobs: packages:weekly-sum: could not store earn log for user %d: %v", u.ID, err)
+		if err := weeklySumStoreEarnLog(tx, u.ID, payout, jobID); err != nil {
+			return fmt.Errorf("week %s: store earn log for user %d: %w (nothing was paid)", weekStartStr, u.ID, err)
 		}
+		paid++
 	}
 
-	_, err := db.Exec(`INSERT INTO weekly_package_summaries (job_id, week_start, week_end, per_week_total, balance_forward, roc_potation, total_amount, created_at, updated_at)
+	if _, err := tx.Exec(`INSERT INTO weekly_package_summaries (job_id, week_start, week_end, per_week_total, balance_forward, roc_potation, total_amount, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-		jobID, weekStartStr, weekEndStr, weekTotal.Float64, remainingBalance, uint64(math.Floor(rocPotation)), total)
-	return err
+		jobID, weekStartStr, weekEndStr, weekTotal.Float64, remainingBalance, uint64(math.Floor(rocPotation)), total); err != nil {
+		return fmt.Errorf("week %s: record summary: %w (nothing was paid)", weekStartStr, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("week %s: commit: %w (nothing was paid)", weekStartStr, err)
+	}
+	log.Printf("jobs: packages:weekly-sum: paid ROC for week %s..%s (%s) to %d users, %.4f each", weekStartStr, weekEndStr, jobID, paid, rocPotation)
+	return nil
 }
 
-func weeklySumCreditRoc(db *sqlx.DB, userID uint64, amount float64) error {
+func weeklySumCreditRoc(db *sqlx.Tx, userID uint64, amount float64) error {
 	var walletID sql.NullInt64
 	err := db.Get(&walletID, "SELECT id FROM wallets WHERE user_id = ?", userID)
 	switch {
@@ -157,7 +174,7 @@ func weeklySumCreditRoc(db *sqlx.DB, userID uint64, amount float64) error {
 	}
 }
 
-func weeklySumStoreEarnLog(db *sqlx.DB, userID uint64, amount float64, jobID string) error {
+func weeklySumStoreEarnLog(db *sqlx.Tx, userID uint64, amount float64, jobID string) error {
 	res, err := db.Exec(`INSERT INTO earn_logs (user_id, amount, description, created_at, updated_at) VALUES (?, ?, 'ROC Income', NOW(), NOW())`,
 		jobsItoa(userID), jobsFtoa(amount))
 	if err != nil {
