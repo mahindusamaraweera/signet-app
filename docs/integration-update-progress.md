@@ -1,5 +1,9 @@
 # Integration update progress
 
+## Registration verification UX correction — 2026-10-11
+
+The Step 1 submit handler previously treated verification_required as a generic error. It now shows a check-inbox/spam status explaining that verification creates the account before package selection, clears password fields after issuance and labels submission “Send verification email” instead of promising direct Step 2 access. It does not bypass or change verification/session rules. Frontend unit suite passes; browser/email end-to-end verification remains outstanding. Dev preview middleware remains separately uncommitted.
+
 ## Registration package gate regression — 2026-10-11
 
 Rechecked that pending email registration does not create the user or session; successful verification creates the account with email_verified_at and only then issues its session. Added passing handler regressions proving unauthenticated direct Step 2 URLs and forged package POSTs return 403 before database access in blockchain mode. This tests the pre-verification anonymous gate, not an end-to-end browser/mail flow or every authenticated account case. Local demo bypass remains dev-only, uncommitted and blocks all submissions.
