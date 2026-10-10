@@ -62,21 +62,27 @@ const totalPayingRoc = computed(() => Number(weeklySummary.value?.total_amount |
 
 const ucfirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
 
+// Paid is final (the ROC is credited to the wallet on the way to paid), so
+// the switch locks once paid; `saving` blocks a double click while the
+// request is in flight.
 async function onToggleStatus(row, event) {
   const checkbox = event.target
   const status = checkbox.checked ? 'paid' : 'pending'
+  row.saving = true
   try {
     const { data } = await api.post('/roc/status-update', { id: row.id, status })
     if (data.success) {
       row.status = status
       toastSuccess(`Status changed to ${ucfirst(status)}`)
     } else {
-      toastError('Failed to update status')
+      toastError(data.message || 'Failed to update status')
       checkbox.checked = !checkbox.checked // revert toggle
     }
   } catch {
     toastError('Server error. Try again.')
     checkbox.checked = !checkbox.checked // revert toggle
+  } finally {
+    row.saving = false
   }
 }
 </script>
@@ -167,7 +173,7 @@ async function onToggleStatus(row, event) {
                 <td>{{ numberFormat(row.amount, 2) }}</td>
                 <td>
                   <div class="form-check form-switch">
-                    <input type="checkbox" class="form-check-input toggle-status" :checked="row.status == 'paid'" @change="onToggleStatus(row, $event)" />
+                    <input type="checkbox" class="form-check-input toggle-status" :checked="row.status == 'paid'" :disabled="row.status == 'paid' || row.saving" @change="onToggleStatus(row, $event)" />
                     <label class="form-check-label">
                       {{ ucfirst(row.status) }}
                     </label>
