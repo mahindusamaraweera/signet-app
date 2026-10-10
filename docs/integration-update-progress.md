@@ -1,5 +1,9 @@
 # Integration update progress
 
+## Asset workspace UI/navigation — 2026-10-11
+
+Added a shared wallet command header and responsive five-destination navigation for deposit/activity, vesting, withdrawals, security and verified Tier linking. Existing brand tokens provide cyan accents, restrained glass surfaces, rounded cards and tabular address text; keyboard focus and reduced-motion handling are explicit. No synthetic live-network indicator is shown. Added the missing Tier sidebar destination, corrected Genealogy label and labelled the mobile close button. Withdrawal security now uses the authenticated dashboard shell rather than an isolated page; obsolete blanket “withdrawals not enabled yet” text is replaced with prerequisite/conditional-processing guidance. No API, financial rule, user data or signet-token flow changed. Frontend tests pass; rendered browser/mobile validation remains required before visual acceptance.
+
 ## New-user-first local verification — 2026-10-11
 
 Full Go backend tests, all 12 frontend tests and the production frontend build pass. Build transforms 271 modules; the existing 742.80 kB main chunk warning remains. These checks do not prove deployed MySQL migrations, signer access, real chain settlement or end-to-end operation.

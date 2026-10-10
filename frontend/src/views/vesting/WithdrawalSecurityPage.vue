@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import QRCode from 'qrcode'
 import api from '@/api/client'
+import DashboardLayout from '@/components/layout/DashboardLayout.vue'
 
 const status = ref(null)
 const busy = ref(false)
@@ -115,9 +116,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <DashboardLayout>
   <main class="container py-3" style="max-width: 760px">
     <h1 class="h4">Withdrawal security</h1>
-    <p class="alert alert-info">Withdrawals are not enabled yet. Email, authenticator and address verification setup are available; withdrawal processing is still being implemented. Device verification is not required for now. No KYC is required.</p>
+    <p class="alert alert-info">Complete email verification, authenticator setup and withdrawal-address verification before requesting a payout. Address waiting periods and security holds still apply. Processing depends on the platform’s enabled services. Device verification and KYC are not required for this flow.</p>
     <p v-if="error" class="alert alert-warning" role="alert">{{ error }}</p>
     <p v-if="message" class="alert alert-success" role="status">{{ message }}</p>
     <section v-if="status" class="card p-3 mb-3">
@@ -189,4 +191,5 @@ onBeforeUnmount(() => {
       </div>
     </section>
   </main>
+  </DashboardLayout>
 </template>
