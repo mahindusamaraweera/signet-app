@@ -98,6 +98,7 @@ func main() {
 
 	if cfg.EnableScheduler {
 		if cfg.BlockchainEnabled {
+			jobs.StartDepositNotifications(conn, deps.Blockchain, securitymail.New(cfg))
 			handlers.StartAutomaticPurchases(deps)
 			handlers.StartRegistrationReopening(deps)
 			handlers.StartCommissionPreparation(deps)

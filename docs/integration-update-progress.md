@@ -1,5 +1,13 @@
 # Integration update progress
 
+## New-user deposit confirmation emails — 2026-10-11
+
+Focused jobs tests now pass after earlier disk-space failures, including rejection of uncredited/internal/malformed/zero deposits and no send when the durable claim fails. These focused tests do not prove SMTP receipt, actual MySQL uniqueness/concurrency or deployed worker behavior.
+
+Added additive migration 032 and a signet-app scheduler worker consuming the source-qualified deposit API. New verified registrations only: existing accounts are not enrolled or sent historical emails. Notifications require USDT status credited plus credited timestamp, validated amount and transaction hash. Durable remote-ID/event uniqueness and immutable identity checks prevent normal polling duplicates; a paginated per-user cursor and rotating checks avoid latest-page starvation. Mail contains amount, BSCScan transaction link and a distinction between credited deposit and package activation. The same bounded TLS mail transport serves security mail. No signet-token/native notifications were changed.
+
+SMTP is not an exactly-once transport. Claim status is persisted before sending; failed or uncertain acceptance becomes review_required, and crash-left sending rows are not automatically resent. Operators must reconcile mail-provider logs before resetting such a row; a missing mail after a crash is possible and must not be silently treated as delivered. Database/SMTP-backed concurrency, recovery and end-to-end mail receipt remain staging gates. Run migration 032 before enabling the scheduler; no migration, actual email or live deposit was executed here. Local preview changes in frontend/vite.config.js remain uncommitted and excluded from this feature.
+
 ## Asset workspace UI/navigation — 2026-10-11
 
 Added a shared wallet command header and responsive five-destination navigation for deposit/activity, vesting, withdrawals, security and verified Tier linking. Existing brand tokens provide cyan accents, restrained glass surfaces, rounded cards and tabular address text; keyboard focus and reduced-motion handling are explicit. No synthetic live-network indicator is shown. Added the missing Tier sidebar destination, corrected Genealogy label and labelled the mobile close button. Withdrawal security now uses the authenticated dashboard shell rather than an isolated page; obsolete blanket “withdrawals not enabled yet” text is replaced with prerequisite/conditional-processing guidance. No API, financial rule, user data or signet-token flow changed. Frontend tests pass; rendered browser/mobile validation remains required before visual acceptance.
