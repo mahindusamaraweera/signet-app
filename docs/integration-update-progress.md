@@ -1,5 +1,11 @@
 # Integration update progress
 
+## Existing-user protection and test retry — 2026-10-11
+
+Reconfirmed that wallet backfill selects all source users regardless of package/status, while expiry requires new-registration enrollment and does not enroll existing accounts. Existing users therefore retain wallet/topup access without becoming deletion candidates. No live wallet provisioning or account mutation was performed.
+
+The previously disk-blocked inventory test now passes: `go test -p=1 ./internal/blockchain ./internal/jobs ./cmd/vesting-inventory` completed successfully. This resolves the local test-link limitation recorded below, not the historical financial reconciliation or staging execution gates. Verified original allocations, prior payouts and manual adjustment evidence remain necessary before historical vesting imports can authorize credits.
+
 ## Legacy vesting evidence export — 2026-10-11
 
 Revalidated source accrual and webhook code: `mining_token` increments as accrual; a sent webhook only proves HTTP delivery, not payment. Current token source has no matching legacy mining webhook receiver. Read-only inventory now includes package activation and webhook status/sent timestamps with explicit limitations and no secret/response-body export. No paid/released amount or historical price is inferred; `import_ready=false` remains. Original payout/receiver and override evidence is still necessary before historical SIGNET allocations can safely be imported. No existing accounts or native flows were changed.
