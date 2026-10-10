@@ -72,17 +72,21 @@ func rocIncomeHandler(d *app.Deps) http.HandlerFunc {
 	}
 }
 
-// rocUpdateStatusHandler ports RocController@updateRocStatus. On a
-// pending->paid transition it calls wallet.UpdateWallet — the CAP-GATED
-// credit path (WalletService::updateWallet in the original; see
-// financial_engine.md §1 / BACKEND_CONVENTIONS.md) — matching
-// `$this->walletService->updateWallet($roc->user_id, $roc->amount,
-// $roc->description)` exactly, including computing the idempotency guard
-// (shouldCreditWallet) BEFORE mutating roc.Status, same as the original.
 // rocWalletCreditDescription labels the earn_logs line written when an admin
 // approves a ROC and it is credited to the wallet.
 const rocWalletCreditDescription = "ROC Income → credited to wallet"
 
+// rocUpdateStatusHandler ports RocController@updateRocStatus. On a
+// pending->paid transition it calls wallet.UpdateWallet — the CAP-GATED
+// credit path (WalletService::updateWallet in the original; see
+// financial_engine.md §1 / BACKEND_CONVENTIONS.md).
+//
+// Deliberate deviations, both of which let the original credit one ROC
+// twice:
+//   - paid is final. Un-ticking (paid -> pending) never reversed the credit,
+//     and re-ticking credited it again; now paid -> pending is refused.
+//   - pending -> paid is claimed with a single conditional UPDATE, so two
+//     concurrent clicks can't both see "not paid yet" and both credit.
 func rocUpdateStatusHandler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -112,29 +116,40 @@ func rocUpdateStatusHandler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 
-		shouldCreditWallet := body.Status == "paid" && roc.Status != "paid"
+		if body.Status == "pending" {
+			if roc.Status == "paid" {
+				httpx.OK(w, map[string]interface{}{"success": false,
+					"message": "This ROC is already paid and credited to the wallet; it can't be set back to pending."})
+				return
+			}
+			httpx.OK(w, map[string]interface{}{"success": true, "message": "Status updated successfully."})
+			return
+		}
 
-		if _, err := d.DB.Exec("UPDATE roc_income_log SET status = ?, updated_at = NOW() WHERE id = ?", body.Status, roc.ID); err != nil {
+		// Claim the pending -> paid transition atomically: only the request
+		// that actually flips the row credits the wallet.
+		res, err := d.DB.Exec("UPDATE roc_income_log SET status = 'paid', updated_at = NOW() WHERE id = ? AND status <> 'paid'", roc.ID)
+		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "Database error")
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			httpx.OK(w, map[string]interface{}{"success": true, "message": "Already paid — not credited again."})
+			return
+		}
+
+		// The original reused roc.Description ("ROC Income") here, so the
+		// wallet credit looked like a second weekly ROC in the user's earn
+		// log. Label it as what it is: the approved ROC moving to the wallet.
+		if err := wallet.UpdateWallet(d.DB, roc.UserID, roc.Amount, rocWalletCreditDescription); err != nil {
+			// Release the claim so the admin can retry; nothing was credited.
+			_, _ = d.DB.Exec("UPDATE roc_income_log SET status = ?, updated_at = NOW() WHERE id = ?", roc.Status, roc.ID)
+			httpx.Error(w, http.StatusInternalServerError, "Could not credit wallet: "+err.Error())
 			return
 		}
 
 		if roc.EarnLogID != 0 {
-			desc := "ROC Income"
-			if body.Status == "paid" {
-				desc = "ROC Income paid"
-			}
-			_, _ = d.DB.Exec("UPDATE earn_logs SET description = ?, updated_at = NOW() WHERE id = ?", desc, roc.EarnLogID)
-		}
-
-		if shouldCreditWallet {
-			// The original reused roc.Description ("ROC Income") here, so the
-			// wallet credit looked like a second weekly ROC in the user's earn
-			// log. Label it as what it is: the approved ROC moving to the wallet.
-			if err := wallet.UpdateWallet(d.DB, roc.UserID, roc.Amount, rocWalletCreditDescription); err != nil {
-				httpx.Error(w, http.StatusInternalServerError, "Could not credit wallet: "+err.Error())
-				return
-			}
+			_, _ = d.DB.Exec("UPDATE earn_logs SET description = 'ROC Income paid', updated_at = NOW() WHERE id = ?", roc.EarnLogID)
 		}
 
 		httpx.OK(w, map[string]interface{}{"success": true, "message": "Status updated successfully."})
