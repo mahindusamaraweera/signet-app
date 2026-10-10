@@ -1,5 +1,9 @@
 # Integration update progress
 
+## Phased historical migration decision — 2026-10-11
+
+Owner clarified that new-user flow validation comes first and historical financial backfill is deferred until after that validation. Already-paid transactions stay audit-only; later reconciliation must separately identify active manually added vesting, released-but-unwithdrawn amounts and unpaid commissions, without duplicate credits or replayed payments. Wallet creation remains separate from balance migration. Existing accounts and native signet-token flows remain unchanged. See the existing-user migration document for the preserved release/backing invariants; this is not approval to execute live transfers or historical imports.
+
 ## Existing-user protection and test retry — 2026-10-11
 
 Reconfirmed that wallet backfill selects all source users regardless of package/status, while expiry requires new-registration enrollment and does not enroll existing accounts. Existing users therefore retain wallet/topup access without becoming deletion candidates. No live wallet provisioning or account mutation was performed.

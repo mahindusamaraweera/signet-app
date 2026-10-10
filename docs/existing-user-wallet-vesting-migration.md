@@ -2,6 +2,14 @@
 
 Status: source review and implementation specification. No production data has been migrated.
 
+## Owner-approved phased rollout — 2026-10-11
+
+First validate the complete new-user system. Do not execute historical financial backfill on launch day. Existing accounts, legacy records and accrual remain unchanged during this phase; source-qualified deposit wallet provisioning is separate and must not credit historical balances or enroll existing users in expiry.
+
+After new-user staging validation, reconcile historical accounts before enabling an explicitly approved backfill. Already completed and paid transactions are audit-only: never replay a transfer or credit them again. Active manually added vesting must retain its verified remaining allocation and release terms in custody; custody backing is not an immediate release of locked tokens. Verified released-but-unwithdrawn balances and unpaid commission balances are separate available obligations, not new package purchases. Prevent overlap between those balances and vesting releases. Do not create fresh deposits, swaps, bonuses or MLM commissions for these historical records.
+
+This decision defers historical execution; it does not establish that `mining_token` is paid or unpaid for every old record. Reconcile actual payment evidence, remaining terms, manual overrides and treasury backing before the later financial cutover. No historical apply/import job may run automatically as part of deployment.
+
 ## Legacy release evidence review — 2026-10-11
 
 The current source `mining_update.go` increments `mining_token` by `daily_mining/1440` every scheduled minute and caps it at `total_token`; it does not record a SIGNET payout. The webhook sends that accrual and marks HTTP delivery success, not chain settlement. No matching legacy `mining_token` webhook receiver was found in the current signet-token application/routes. Production records may reflect older implementations or manual changes, so source arithmetic alone cannot certify previously paid amounts.
