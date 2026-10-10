@@ -2,6 +2,12 @@
 
 Status: source review and implementation specification. No production data has been migrated.
 
+## Legacy release evidence review — 2026-10-11
+
+The current source `mining_update.go` increments `mining_token` by `daily_mining/1440` every scheduled minute and caps it at `total_token`; it does not record a SIGNET payout. The webhook sends that accrual and marks HTTP delivery success, not chain settlement. No matching legacy `mining_token` webhook receiver was found in the current signet-token application/routes. Production records may reflect older implementations or manual changes, so source arithmetic alone cannot certify previously paid amounts.
+
+The read-only inventory now also exports recorded package activation timestamps and mining webhook delivery status/sent timestamps, with explicit evidence limits. It excludes secret keys and raw webhook response bodies. These fields help locate payment evidence but do not authorize import or reconstruct original vesting dates. Required next evidence: the actual legacy webhook receiver/payout ledger, original allocation/payment terms, and manual adjustment history. Existing user rows and accrual behavior were not changed, and no inventory was executed against a real database.
+
 ## Wallet backfill audit update — 2026-10-11
 
 The apply command now requires migration 031, which creates an empty independent `blockchain_wallet_provisioning_audit` table. It does not change existing accounts, balances, packages or expiry enrollment. Each ready wallet must have a nonzero valid BSC address, USDT asset and the explicitly expected chain. Default is mainnet `-chain-id 56`; testnet requires `-chain-id 97`. Record source user ID, chain and lowercase public address before advancing the cursor. Retries cannot overwrite an existing audited address or assign it to another source user. Audit/output failures preserve the previous successful cursor; retry the same user through the source-qualified idempotent service. This wallet operation never imports vesting or credits SIGNET. No real backfill was run.

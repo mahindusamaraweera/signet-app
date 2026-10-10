@@ -1,5 +1,9 @@
 # Integration update progress
 
+## Legacy vesting evidence export — 2026-10-11
+
+Revalidated source accrual and webhook code: `mining_token` increments as accrual; a sent webhook only proves HTTP delivery, not payment. Current token source has no matching legacy mining webhook receiver. Read-only inventory now includes package activation and webhook status/sent timestamps with explicit limitations and no secret/response-body export. No paid/released amount or historical price is inferred; `import_ready=false` remains. Original payout/receiver and override evidence is still necessary before historical SIGNET allocations can safely be imported. No existing accounts or native flows were changed.
+
 ## Existing-user wallet provisioning audit — 2026-10-11
 
 Existing users remain eligible for on-demand/batch custody wallet provisioning while remaining excluded from automatic expiry. Hardened batch apply with mainnet-by-default chain validation (`-chain-id 97` explicitly selects testnet), nonzero address/asset checks and whole-batch ID validation before provisioning. Migration 031 creates an independent immutable source-ID/address audit table; the command records/validates mapping before advancing its resume cursor. A missing/conflicting audit or output failure stops at the last successful user. No source account/status/package/balance or expiry-enrollment changes are performed, and no actual wallet backfill was executed. Historical vesting import still needs verified allocation/released/paid amounts, purchase dates, legacy `mining_token` interpretation and manual adjustment evidence; a clarification was requested rather than guessing financial entitlements. Signet-token source and both main branches are unchanged by this step.
