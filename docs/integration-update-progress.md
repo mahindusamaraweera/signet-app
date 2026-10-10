@@ -1,5 +1,13 @@
 # Integration update progress
 
+## New-user-first local verification — 2026-10-11
+
+Full Go backend tests, all 12 frontend tests and the production frontend build pass. Build transforms 271 modules; the existing 742.80 kB main chunk warning remains. These checks do not prove deployed MySQL migrations, signer access, real chain settlement or end-to-end operation.
+
+Staging acceptance must use a fresh test account and an agreed funds limit: referral registration and email verification; default $1,000+ catalog with optional lower packages; partial funding reminder/account protection; sufficient confirmed funding and automatic purchase; separate USDT service fee; actual swap-output bonus and custody vesting; retry without duplicate execution; income-cap commission diversion to treasury; eligible topup without buyer allocation; Tier option 1/2 terms and per-second display; audited admin adjustment; email/TOTP/address-wait withdrawal with 97% SIGNET payout and 3% conversion to USDT fee; new zero-funded expiry and email reuse; and proof that existing accounts are not enrolled in expiry. Retain order IDs, source IDs, audit events and confirmed transaction hashes, with no credentials or secrets. Restart/retry and pending-transaction protections must also pass. Historical financial backfill is excluded from this first phase, not silently completed.
+
+No staging credentials, approved financial test limit or resulting transaction/audit evidence is available in this workspace. The owner will perform live testing; no funds were transferred and no deployed configuration was modified here.
+
 ## Phased historical migration decision — 2026-10-11
 
 Owner clarified that new-user flow validation comes first and historical financial backfill is deferred until after that validation. Already-paid transactions stay audit-only; later reconciliation must separately identify active manually added vesting, released-but-unwithdrawn amounts and unpaid commissions, without duplicate credits or replayed payments. Wallet creation remains separate from balance migration. Existing accounts and native signet-token flows remain unchanged. See the existing-user migration document for the preserved release/backing invariants; this is not approval to execute live transfers or historical imports.
