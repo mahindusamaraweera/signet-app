@@ -2,6 +2,12 @@
 
 Status: source review and implementation specification. No production data has been migrated.
 
+## Wallet backfill audit update — 2026-10-11
+
+The apply command now requires migration 031, which creates an empty independent `blockchain_wallet_provisioning_audit` table. It does not change existing accounts, balances, packages or expiry enrollment. Each ready wallet must have a nonzero valid BSC address, USDT asset and the explicitly expected chain. Default is mainnet `-chain-id 56`; testnet requires `-chain-id 97`. Record source user ID, chain and lowercase public address before advancing the cursor. Retries cannot overwrite an existing audited address or assign it to another source user. Audit/output failures preserve the previous successful cursor; retry the same user through the source-qualified idempotent service. This wallet operation never imports vesting or credits SIGNET. No real backfill was run.
+
+Verification: full Go suite, static checks and focused backfill/audit race tests passed. SQL audit tests use a scripted driver to assert immutable query behavior; real MySQL uniqueness/concurrency, wallet signer provisioning and production user inventory still require staging verification.
+
 ## Preserve accounts
 
 Keep `users.id`, credentials, statuses, referrals, package records and MLM placement unchanged. Provision wallets for existing users through the same source-qualified mapping used for new users: `(signet-app, users.id)`. Never match database IDs between services, silently merge accounts by email, or require users to register again.

@@ -16,8 +16,9 @@ func main() {
 	apply := flag.Bool("apply", false, "provision wallets; default only reviews source user IDs")
 	after := flag.Uint64("after-user-id", 0, "exclusive resume cursor")
 	limit := flag.Int("limit", 100, "maximum users in this run, 1..1000")
+	chainID := flag.Uint64("chain-id", 56, "expected BSC network: 56 mainnet or 97 testnet")
 	flag.Parse()
-	if *limit < 1 || *limit > 1000 || flag.NArg() != 0 {
+	if *limit < 1 || *limit > 1000 || (*chainID != 56 && *chainID != 97) || flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "invalid arguments")
 		os.Exit(1)
 	}
@@ -51,7 +52,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "user inventory query failed")
 		os.Exit(1)
 	}
-	cursor, err := blockchain.BackfillWallets(ctx, ids, *apply, gateway, os.Stdout)
+	var audit blockchain.WalletAuditRecorder
+	if *apply {
+		audit = blockchain.SQLWalletAuditRecorder{DB: conn.DB}
+	}
+	cursor, err := blockchain.BackfillWalletsAudited(ctx, ids, *apply, *chainID, gateway, audit, os.Stdout)
 	if cursor == 0 {
 		cursor = *after
 	}
