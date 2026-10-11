@@ -12,15 +12,21 @@ import (
 
 	"signet-backend/internal/app"
 	"signet-backend/internal/auth"
+	"signet-backend/internal/blockchain"
 	"signet-backend/internal/config"
 	"signet-backend/internal/db"
 	"signet-backend/internal/handlers"
 	"signet-backend/internal/jobs"
+	"signet-backend/internal/registrationverification"
+	"signet-backend/internal/securitymail"
 	"signet-backend/internal/storage"
+	"signet-backend/internal/wallet"
+	"signet-backend/internal/withdrawalsecurity"
 )
 
 func main() {
 	cfg := config.Load()
+	wallet.ConfigurePendingCommissionGuard(cfg.BlockchainEnabled && cfg.BlockchainTopupEnabled)
 
 	conn, err := db.Connect(cfg)
 	if err != nil {
@@ -42,6 +48,20 @@ func main() {
 	}
 	cancel()
 	deps := &app.Deps{DB: conn, Auth: authSvc, Cfg: cfg, Storage: store}
+	deps.Registration, err = registrationverification.NewService(conn.DB, []byte(cfg.SessionSecret), cfg.AppURL, securitymail.New(cfg))
+	if err != nil {
+		log.Printf("registration verification unavailable: check application URL and signing key configuration")
+	}
+	deps.WithdrawalSecurity, err = withdrawalsecurity.NewService(conn.DB, []byte(cfg.SessionSecret))
+	if err != nil {
+		log.Printf("withdrawal security unavailable: check signing key configuration")
+	}
+	if cfg.BlockchainEnabled {
+		deps.Blockchain, err = blockchain.New(cfg.BlockchainServiceURL, cfg.BlockchainServiceToken)
+		if err != nil {
+			log.Fatalf("blockchain configuration: %v", err)
+		}
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -54,6 +74,11 @@ func main() {
 	})
 
 	handlers.RegisterAuthRoutes(r, deps)
+	handlers.RegisterBlockchainRoutes(r, deps)
+	handlers.RegisterWithdrawalCallbackRoutes(r, deps)
+	handlers.RegisterBlockchainVestingRoutes(r, deps)
+	handlers.RegisterIncomeCapRoutes(r, deps)
+	handlers.RegisterTierAccountLinkRoutes(r, deps)
 	handlers.RegisterGoogleAuthRoutes(r, deps)
 	handlers.RegisterTokenRoutes(r, deps)
 	handlers.RegisterDashboardRoutes(r, deps)
@@ -72,7 +97,19 @@ func main() {
 	handlers.RegisterAPIV1Routes(r, deps)
 
 	if cfg.EnableScheduler {
+		if cfg.BlockchainEnabled {
+			jobs.StartDepositNotifications(conn, deps.Blockchain, securitymail.New(cfg))
+			handlers.StartAutomaticPurchases(deps)
+			handlers.StartRegistrationReopening(deps)
+			handlers.StartCommissionPreparation(deps)
+			handlers.StartCommissionDelivery(deps)
+			handlers.StartWithdrawalSubmission(deps)
+			handlers.StartWithdrawalCancellation(deps)
+		}
 		jobs.StartScheduler(conn, cfg)
+		if cfg.RegistrationExpiryEnabled {
+			jobs.StartRegistrationExpiry(conn, deps.Blockchain, cfg.BlockchainEnabled)
+		}
 	}
 
 	log.Printf("Signet API listening on :%s (env=%s, db=%s@%s)", cfg.Port, cfg.AppEnv, cfg.DBDatabase, cfg.DBHost)

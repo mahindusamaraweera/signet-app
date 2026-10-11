@@ -221,7 +221,7 @@ func buyPackageHandler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var packages []models.Package
 		_ = d.DB.Select(&packages, "SELECT * FROM packages WHERE status = 'active'")
-		httpx.OK(w, map[string]interface{}{"status": "success", "packages": packages})
+		httpx.OK(w, map[string]interface{}{"status": "success", "packages": packages, "blockchain_enabled": d.Cfg.BlockchainEnabled, "topup_enabled": d.Cfg.BlockchainTopupEnabled})
 	}
 }
 
@@ -248,6 +248,10 @@ func buyPackageHandler(d *app.Deps) http.HandlerFunc {
 //  9. Insert the new user_packages row: status=pending, sale=other.
 func buyPackagesHandler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if d.Cfg.BlockchainEnabled {
+			createBlockchainTopup(d, w, r)
+			return
+		}
 		var body struct {
 			Package string `json:"package"`
 		}

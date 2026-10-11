@@ -118,6 +118,17 @@ func miningUpdateHandler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 		var userCount int
+		if d.Cfg.BlockchainEnabled {
+			var integrated int
+			if err := d.DB.Get(&integrated, "SELECT COUNT(*) FROM package_purchase_intents WHERE user_id=? AND purchase_kind='first' AND status='completed'", id); err != nil {
+				httpx.Error(w, 503, "Vesting status temporarily unavailable")
+				return
+			}
+			if integrated > 0 {
+				httpx.Error(w, 409, "This user's vesting is managed by the blockchain vesting administration; legacy mining allocation cannot be changed")
+				return
+			}
+		}
 		_ = d.DB.Get(&userCount, "SELECT COUNT(*) FROM users WHERE id = ?", id)
 		if userCount == 0 {
 			httpx.OK(w, map[string]interface{}{"success": false, "message": "User not found"})

@@ -4,6 +4,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"time"
@@ -18,10 +19,21 @@ func init() {
 }
 
 type Config struct {
-	AppName string
-	AppURL  string
-	AppEnv  string
-	Port    string
+	RegistrationExpiryEnabled               bool
+	BlockchainEnabled                       bool
+	BlockchainTopupEnabled                  bool
+	BlockchainCommissionPreparationEnabled  bool
+	BlockchainCommissionDeliveryEnabled     bool
+	BlockchainServiceURL                    string
+	BlockchainServiceToken                  string
+	BlockchainWithdrawalAuthorizationKey    string
+	BlockchainWithdrawalSubmissionEnabled   bool
+	BlockchainWithdrawalCallbackToken       string
+	BlockchainWithdrawalCancellationEnabled bool
+	AppName                                 string
+	AppURL                                  string
+	AppEnv                                  string
+	Port                                    string
 
 	DBHost     string
 	DBPort     string
@@ -94,10 +106,21 @@ func Load() *Config {
 	}
 
 	return &Config{
-		AppName: env("APP_NAME", "Signetint.net"),
-		AppURL:  env("APP_URL", "http://127.0.0.1:8080"),
-		AppEnv:  env("APP_ENV", "local"),
-		Port:    env("PORT", "8080"),
+		RegistrationExpiryEnabled:               envBool("REGISTRATION_EXPIRY_ENABLED", false),
+		BlockchainEnabled:                       envBool("BLOCKCHAIN_ENABLED", false),
+		BlockchainTopupEnabled:                  envBool("BLOCKCHAIN_TOPUP_ENABLED", false),
+		BlockchainCommissionPreparationEnabled:  envBool("BLOCKCHAIN_COMMISSION_PREPARATION_ENABLED", false),
+		BlockchainCommissionDeliveryEnabled:     envBool("BLOCKCHAIN_COMMISSION_DELIVERY_ENABLED", false),
+		BlockchainServiceURL:                    env("BLOCKCHAIN_SERVICE_URL", ""),
+		BlockchainServiceToken:                  env("BLOCKCHAIN_SERVICE_TOKEN", ""),
+		BlockchainWithdrawalAuthorizationKey:    env("SIGNET_APP_WITHDRAWAL_AUTHORIZATION_KEY", ""),
+		BlockchainWithdrawalSubmissionEnabled:   envBool("BLOCKCHAIN_WITHDRAWAL_SUBMISSION_ENABLED", false),
+		BlockchainWithdrawalCallbackToken:       env("SIGNET_APP_WITHDRAWAL_CALLBACK_TOKEN", ""),
+		BlockchainWithdrawalCancellationEnabled: envBool("BLOCKCHAIN_WITHDRAWAL_CANCELLATION_ENABLED", false),
+		AppName:                                 env("APP_NAME", "Signetint.net"),
+		AppURL:                                  env("APP_URL", "http://127.0.0.1:8080"),
+		AppEnv:                                  env("APP_ENV", "local"),
+		Port:                                    env("PORT", "8080"),
 
 		DBHost:     env("DB_HOST", "127.0.0.1"),
 		DBPort:     env("DB_PORT", "3306"),
@@ -129,6 +152,17 @@ func Load() *Config {
 		AWSEndpoint:      env("AWS_ENDPOINT", ""),
 		AWSUsePathStyle:  envBool("AWS_USE_PATH_STYLE_ENDPOINT", false),
 	}
+}
+
+// WithdrawalAuthorizationKey fails closed; approval authority must not be
+// obtainable through a leaked integration bearer token or browser session key.
+// Call this before starting the withdrawal worker, not ordinary API startup.
+func (c *Config) WithdrawalAuthorizationKey() ([]byte, error) {
+	key := c.BlockchainWithdrawalAuthorizationKey
+	if len(key) < 32 || key == c.BlockchainServiceToken || key == c.SessionSecret {
+		return nil, errors.New("withdrawal authorization requires an independent key of at least 32 bytes")
+	}
+	return []byte(key), nil
 }
 
 func (c *Config) MySQLDSN() string {

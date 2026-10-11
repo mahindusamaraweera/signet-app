@@ -10,13 +10,19 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"signet-backend/internal/auth"
+	"signet-backend/internal/blockchain"
 	"signet-backend/internal/config"
+	"signet-backend/internal/registrationverification"
 	"signet-backend/internal/storage"
+	"signet-backend/internal/withdrawalsecurity"
 )
 
 type Deps struct {
-	DB      *sqlx.DB
-	Auth    *auth.Service
-	Cfg     *config.Config
-	Storage storage.Store
+	Registration       *registrationverification.Service
+	WithdrawalSecurity *withdrawalsecurity.Service
+	Blockchain         *blockchain.Gateway
+	DB                 *sqlx.DB
+	Auth               *auth.Service
+	Cfg                *config.Config
+	Storage            storage.Store
 }

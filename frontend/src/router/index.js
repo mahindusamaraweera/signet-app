@@ -6,11 +6,21 @@ import { useAuthStore } from '@/store/auth'
 // "any authenticated user"; `meta.public: true` means no auth required at
 // all (login, register, password reset, the marketing homepage).
 const routes = [
+  { path: '/wallet/tier-link', name: 'wallet.tier-link', component: () => import('@/views/vesting/TierAccountLinkPage.vue') },
+  { path: '/wallet/tier-link/callback', name: 'wallet.tier-link.callback', component: () => import('@/views/vesting/TierAccountLinkPage.vue') },
+  { path: '/wallet/deposits', name: 'wallet.deposits', component: () => import('@/views/vesting/BlockchainWalletPage.vue') },
+  { path: '/wallet/security', name: 'wallet.security', component: () => import('@/views/vesting/WithdrawalSecurityPage.vue') },
+  { path: '/wallet/withdraw', name: 'wallet.withdraw', component: () => import('@/views/vesting/WithdrawalPage.vue') },
+	{ path: '/wallet/vesting', name: 'wallet.vesting', component: () => import('@/views/vesting/BlockchainVestingPage.vue') },
+	{ path: '/admin/vesting', name: 'admin.vesting', component: () => import('@/views/vesting/BlockchainVestingPage.vue'), props: { admin: true }, meta: { roles: ['company', 'admin'] } },
+	{ path: '/register/funding/:id', name: 'register.funding', component: () => import('@/views/auth/RegisterFundingPage.vue'), meta: { public: true } },
   { path: '/', name: 'home', component: () => import('@/views/PublicHomePage.vue'), meta: { public: true, skin: 'site' } },
   { path: '/login', name: 'login', component: () => import('@/views/auth/LoginPage.vue'), meta: { public: true } },
   { path: '/password/reset', name: 'password.request', component: () => import('@/views/auth/ForgotPasswordPage.vue'), meta: { public: true } },
+  { path: '/password/reset/verify', name: 'password.reset.verify', component: () => import('@/views/auth/ResetPasswordPage.vue'), meta: { public: true } },
   { path: '/password/reset/:token', name: 'password.reset', component: () => import('@/views/auth/ResetPasswordPage.vue'), meta: { public: true }, props: true },
   { path: '/register', name: 'register.step1', component: () => import('@/views/auth/RegisterStep1Page.vue'), meta: { public: true } },
+  { path: '/register/verify', name: 'register.verify', component: () => import('@/views/auth/RegisterVerifyEmailPage.vue'), meta: { public: true } },
   { path: '/register/step2/:id', name: 'register.step2', component: () => import('@/views/auth/RegisterStep2Page.vue'), meta: { public: true }, props: true },
   { path: '/register/step3/:id', name: 'register.step3.wait', component: () => import('@/views/auth/RegisterStep3WaitPage.vue'), meta: { public: true }, props: true },
   { path: '/register/status/:id', name: 'register.step3.status', component: () => import('@/views/auth/RegisterStatusPage.vue'), meta: { public: true }, props: true },
