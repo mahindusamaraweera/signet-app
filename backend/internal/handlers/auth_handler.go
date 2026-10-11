@@ -7,6 +7,7 @@ package handlers
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -292,6 +293,9 @@ func registerStep1Handler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 		if err != nil {
+			// The reason stays server-side (journalctl -u signet-api); the
+			// client only learns that delivery failed.
+			log.Printf("register/step1: verification email to %s failed: %v", body.Email, err)
 			httpx.Error(w, 503, "Unable to send registration verification email")
 			return
 		}

@@ -125,7 +125,7 @@ func (s *Service) Issue(ctx context.Context, email, password string, data Data, 
 		return "", errors.New("registration verification request was superseded")
 	}
 	if deliveryErr != nil {
-		return "", errors.New("registration verification email could not be delivered")
+		return "", fmt.Errorf("registration verification email could not be delivered: %w", deliveryErr)
 	}
 	return p.ID, nil
 }
