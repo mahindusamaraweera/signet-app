@@ -7,6 +7,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Swal from 'sweetalert2'
 import api from '@/api/client'
 import FlashAlert from '@/components/shared/FlashAlert.vue'
+import RegistrationProgress from '@/components/RegistrationProgress.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -321,7 +322,7 @@ async function onSubmit() {
 
 <template>
   <main>
-    <section class="min-vh-100 py-5 d-flex align-items-center" style="background: linear-gradient(180deg, #f7f9fc 0%, #eef1f8 100%)">
+    <section class="min-vh-100 py-5 d-flex align-items-center">
       <div class="container">
         <div class="row justify-content-center">
           <div class="col-12 col-lg-8 col-xl-7">
@@ -343,15 +344,9 @@ async function onSubmit() {
 
             <div v-else class="card border-0 shadow-lg rounded-4 overflow-hidden">
               <div class="px-4 px-md-5 pt-4 pt-md-5">
-                <div class="d-flex align-items-center justify-content-between mb-2">
-                  <span class="badge rounded-pill text-bg-primary bg-opacity-10 text-primary fw-semibold px-3 py-2">Step 1 of 2</span>
-                  <span class="text-muted small">Account details</span>
-                </div>
+                <RegistrationProgress :step="1" />
                 <h1 class="h3 fw-bold mb-1">Create your account</h1>
                 <p class="text-muted mb-4">Account details → verify email → select package → fund your wallet.</p>
-                <div class="progress mb-4" style="height: 6px; border-radius: 999px">
-                  <div class="progress-bar bg-primary" role="progressbar" style="width: 50%; border-radius: 999px"></div>
-                </div>
               </div>
 
               <form method="POST" class="px-4 px-md-5 pb-4 pb-md-5" @submit.prevent="onSubmit">

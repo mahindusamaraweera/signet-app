@@ -1,5 +1,9 @@
 # Integration update progress
 
+## Registration journey arrangement — 2026-10-11
+
+Added a shared noninteractive four-stage progress indicator across account, check-email, verification, package and funding screens; it reflects the journey rather than an inaccurate two-step/50% claim and cannot bypass verification. Package selection now presents keyboard-accessible native radio cards, optional lower/test choices, loading/empty/error states, field validation feedback and a separate two-decimal cost summary with a full-width next-step action. Default 1,000+ ordering is preserved. Removed the account screen's conflicting inline light background in favor of the existing theme. Existing design-system tokens unify cyan accents, card spacing, typography and mobile stacking. API submissions, financial calculations and legacy branch navigation are unchanged; frontend display totals are not transaction authority. Fourteen tests pass; rendered/mobile and real registration acceptance remain outstanding. No user, native token or deployed environment changes; work remains on blockchain-automation.
+
 ## Branded verification email and automatic continuation — 2026-10-11
 
 Registration production mailer now sends multipart plain-text/HTML with a SIGNET-styled verification button, expiry/single-use guidance, safe escaped fallback URL and no remote tracking assets. Optional SendVerification interface preserves existing plain test/adaptor mailers; other security mail remains plain and retains bounded TLS transport. MIME tests verify both representations and unmodified plain challenges. Signet-token signed verification routes were inspected for reference, not changed.

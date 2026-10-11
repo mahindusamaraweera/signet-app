@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import AuthCardLayout from '@/components/layout/AuthCardLayout.vue'
+import RegistrationProgress from '@/components/RegistrationProgress.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +34,7 @@ onMounted(verify)
 
 <template>
   <AuthCardLayout back-text="Back to login" back-to="/login">
+    <RegistrationProgress :step="2" />
     <div class="verification-orb" aria-hidden="true">{{ error ? '!' : '✓' }}</div>
       <p class="small text-info">SIGNET · EMAIL VERIFICATION</p>
       <h1 class="h3">{{ busy ? 'Verifying your email…' : error ? 'Let’s get you back on track' : 'Email confirmed' }}</h1>

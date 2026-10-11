@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import AuthCardLayout from '@/components/layout/AuthCardLayout.vue'
+import RegistrationProgress from '@/components/RegistrationProgress.vue'
 
 const route = useRoute()
 const restart = computed(() => ({ name: 'register.step1', query: typeof route.query.ref === 'string' ? { ref: route.query.ref } : {} }))
@@ -9,6 +10,7 @@ const restart = computed(() => ({ name: 'register.step1', query: typeof route.qu
 
 <template>
   <AuthCardLayout back-text="Back to login" back-to="/login" card-class="email-check-card p-4 p-lg-5 w-100">
+    <RegistrationProgress :step="2" />
     <div class="email-check-icon" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="18" height="14" rx="3" /><path d="m4 7 8 6 8-6" /></svg>
     </div>

@@ -5,6 +5,7 @@ import AuthCardLayout from '@/components/layout/AuthCardLayout.vue'
 import QRCode from 'qrcode'
 import PartialDepositReminder from '@/components/PartialDepositReminder.vue'
 import { usdtDisplay, usdtDeficitDisplay } from '@/utils/usdtDisplay'
+import RegistrationProgress from '@/components/RegistrationProgress.vue'
 
 const wallet = ref(null)
 const purchase = ref(null)
@@ -44,6 +45,7 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
 <template>
   <AuthCardLayout back-text="Back to login" back-to="/login" card-class="funding-card p-4 p-lg-5 w-100">
     <PartialDepositReminder :purchase="purchase" />
+    <RegistrationProgress :step="4" />
     <div class="funding-kicker">SIGNET · PACKAGE ACTIVATION</div>
     <h1 class="h3 mb-2">Fund your package</h1>
     <p class="funding-intro">Fund your package with USDT. We’ll handle activation after your deposit is confirmed.</p>
