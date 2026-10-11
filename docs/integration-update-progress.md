@@ -1,5 +1,9 @@
 # Integration update progress
 
+## One-USDT live test package support — 2026-10-11
+
+Owner requested a 1 USDT package, interpreted service fee as 0.10 USDT and additive bonus as 200% of actual confirmed swap output. Source terms now use decimal strings so the fractional fee is not truncated: required deposit 1.10 USDT; swap only 1 USDT; fee routes independently. Frontend optional lower/test choices retain the default 1,000+ featured catalog. Token integration commercial catalog adds the matching nonfeatured terms on feature/live-test-package; native catalog/flows are unchanged. This does not create a deployed package or authorize an actual transfer. Create the source package through company administration and map its actual ID with approved vesting_days in SIGNET_APP_PACKAGE_POLICIES_JSON. Commission/MLM rules remain unchanged; test entitlement must not be made instantly withdrawable by bypassing vesting/security. No production database/environment changes were performed. Deployment and actual ID/default vesting terms remain required.
+
 ## Registration verification UX correction — 2026-10-11
 
 The Step 1 submit handler previously treated verification_required as a generic error. It now shows a check-inbox/spam status explaining that verification creates the account before package selection, clears password fields after issuance and labels submission “Send verification email” instead of promising direct Step 2 access. It does not bypass or change verification/session rules. Frontend unit suite passes; browser/email end-to-end verification remains outstanding. Dev preview middleware remains separately uncommitted.
