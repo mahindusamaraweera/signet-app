@@ -1,5 +1,9 @@
 # Integration update progress
 
+## Dedicated check-email screen — 2026-10-11
+
+After a successful verification_required response, registration now clears all submitted form fields and replaces the form route with /register/check-email. No email, personal fields, passwords, pending registration ID or verification token are persisted in query/history/storage; only the public referral code is carried for restarting registration. The dedicated responsive SIGNET card explains inbox/spam checks, the verification link, and subsequent package funding. It offers restart/sign-in navigation without fake resend, mailbox access or a verification bypass. Server verification remains unchanged. Fourteen frontend tests and production build pass; live mail/browser acceptance remains a staging check. Work stays on blockchain-automation; no main merge or deployed/account change.
+
 ## Funding screen redesign — 2026-10-11
 
 Reworked the registration funding screen using existing SIGNET design tokens: prominent required-deposit amount, network badge, responsive QR/address panel with copy feedback, aligned package/fee/confirmed balance breakdown and clearer deposit empty state. Amounts display with two decimal places and separators through string/BigInt formatting, never floating-point financial arithmetic. Raw API amounts and transaction logic are unchanged. Positive sub-cent deficits explicitly read less than 0.01 and exact remaining amount is expandable; other amounts retain exact tooltips. Clipboard failure keeps selectable address available. No simulated funding progress or confirmation is presented. Fourteen frontend tests pass, including fractional test-package values, rounding carry, large exact decimals and sub-cent deficits. Browser/mobile rendering and actual funding still require validation; no production settings, user records or signet-token flows changed.

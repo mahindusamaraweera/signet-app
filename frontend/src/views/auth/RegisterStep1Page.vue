@@ -18,7 +18,6 @@ const leaders = ref([])
 const submitting = ref(false)
 const errors = ref({})
 const formError = ref('')
-const verificationNotice = ref('')
 const blockchainEnabled = ref(false)
 
 const form = reactive({
@@ -298,9 +297,11 @@ async function onSubmit() {
   try {
     const { data } = await api.post('/register/step1', { ...form })
     if (data.status === 'verification_required') {
-      verificationNotice.value = 'Check your inbox and spam folder for the verification link. Your account is created only after you verify your email. Then you can select a package and fund your personal wallet.'
-      form.password = ''
-      form.password_confirmation = ''
+      const referral = form.referral_code
+      // Do not retain submitted personal data, passwords or pending IDs in
+      // history/storage. Only the public referral code is kept for restarting.
+      for (const field of Object.keys(form)) form[field] = ''
+      await router.replace({ name: 'register.check-email', query: referral ? { ref: referral } : {} })
     } else if (data.status === 'success') {
       router.push({ name: 'register.step2', params: { id: data.user_id } })
     } else {
@@ -355,10 +356,6 @@ async function onSubmit() {
 
               <form method="POST" class="px-4 px-md-5 pb-4 pb-md-5" @submit.prevent="onSubmit">
                 <FlashAlert type="danger" :message="formError" @close="formError = ''" />
-                <div v-if="verificationNotice" class="alert alert-info" role="status">
-                  <h2 class="h6">Verify your email to continue</h2>
-                  <p class="mb-0">{{ verificationNotice }}</p>
-                </div>
 
                 <div class="bg-light rounded-3 mb-4">
                   <h2 class="h6 fw-bold text-uppercase text-muted mb-3" style="letter-spacing: .05em; font-size: .75rem">Referral &amp; management</h2>
