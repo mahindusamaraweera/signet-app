@@ -1,5 +1,7 @@
 # Integration update progress
 
+2026-10-11: Added a regression proving activation-service and placement errors suppress partial-deposit reminders based on stale balances. All 15 frontend tests pass. This does not prove live activation: the deployed package-policy mapping and purchase-worker logs are still needed. No real transfers, deployment, or main merge performed.
+
 ## Credited deposit / activation diagnostics and funding viewport — 2026-10-11
 
 Owner screenshot shows credited/swept 1.10 USDT with a stale awaiting_deposit intent showing zero available. This is not evidence of the remote swap/bonus being completed or its deployed root cause. Source automatic worker already synchronizes the durable purchase and only activates after confirmed remote swap/vesting evidence. Added migration 033 with last attempt and sanitized sync-error fields; failed attempts now rotate so first-batch failures cannot starve subsequent purchases. The purchase API exposes these diagnostics; funding UI distinguishes absent/failed worker checks from fresh funding deficits, and suppresses additional-deposit reminders on sync errors. No request-path financial execution or forced/replayed live swap was added. A successful sync clears the diagnostic; money state remains authoritative.
