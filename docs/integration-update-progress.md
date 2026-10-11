@@ -1,5 +1,11 @@
 # Integration update progress
 
+## Branded verification email and automatic continuation — 2026-10-11
+
+Registration production mailer now sends multipart plain-text/HTML with a SIGNET-styled verification button, expiry/single-use guidance, safe escaped fallback URL and no remote tracking assets. Optional SendVerification interface preserves existing plain test/adaptor mailers; other security mail remains plain and retains bounded TLS transport. MIME tests verify both representations and unmodified plain challenges. Signet-token signed verification routes were inspected for reference, not changed.
+
+The link's fragment credentials are still removed from browser history and kept only in component memory. The browser automatically POSTs verification on mount, then navigates to package selection; no normal second confirmation button. Errors show appropriate restart/sign-in guidance; retries appear only while a valid token remains, and 422 clears it. Single-use server checks remain intact. Automatic browser execution trades the previous explicit-confirmation protection for the requested one-click flow: advanced mail scanners running JavaScript can consume a link. Basic server-only link fetching cannot read fragment credentials. Real mailbox/link rewriting, scanner behavior, browser redirects and SMTP rendering require staging acceptance. Focused Go tests, fourteen frontend tests and production build pass. No live email, account, native token-flow mutation, push or main merge occurred.
+
 ## Dedicated check-email screen — 2026-10-11
 
 After a successful verification_required response, registration now clears all submitted form fields and replaces the form route with /register/check-email. No email, personal fields, passwords, pending registration ID or verification token are persisted in query/history/storage; only the public referral code is carried for restarting registration. The dedicated responsive SIGNET card explains inbox/spam checks, the verification link, and subsequent package funding. It offers restart/sign-in navigation without fake resend, mailbox access or a verification bypass. Server verification remains unchanged. Fourteen frontend tests and production build pass; live mail/browser acceptance remains a staging check. Work stays on blockchain-automation; no main merge or deployed/account change.

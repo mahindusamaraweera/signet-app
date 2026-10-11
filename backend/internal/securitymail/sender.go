@@ -4,13 +4,17 @@
 package securitymail
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
 	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -30,6 +34,42 @@ func validMailbox(value string) bool {
 }
 
 func (s *Sender) Send(ctx context.Context, to, subject, body string) error {
+	return s.send(ctx, to, subject, body, "")
+}
+
+func (s *Sender) SendHTML(ctx context.Context, to, subject, plain, html string) error {
+	return s.send(ctx, to, subject, plain, html)
+}
+
+func mailContent(plain, html string) (string, string, error) {
+	if html == "" {
+		return "text/plain; charset=UTF-8", plain, nil
+	}
+	var buffer bytes.Buffer
+	w := multipart.NewWriter(&buffer)
+	for _, part := range []struct{ kind, body string }{{"text/plain", plain}, {"text/html", html}} {
+		header := textproto.MIMEHeader{}
+		header.Set("Content-Type", part.kind+"; charset=UTF-8")
+		header.Set("Content-Transfer-Encoding", "quoted-printable")
+		p, err := w.CreatePart(header)
+		if err != nil {
+			return "", "", err
+		}
+		encoded := quotedprintable.NewWriter(p)
+		if _, err = encoded.Write([]byte(part.body)); err != nil {
+			return "", "", err
+		}
+		if err = encoded.Close(); err != nil {
+			return "", "", err
+		}
+	}
+	if err := w.Close(); err != nil {
+		return "", "", err
+	}
+	return "multipart/alternative; boundary=" + w.Boundary(), buffer.String(), nil
+}
+
+func (s *Sender) send(ctx context.Context, to, subject, body, html string) error {
 	if s.cfg == nil || !validMailbox(to) || !validMailbox(s.cfg.MailFrom) || subject == "" || strings.ContainsAny(subject, "\r\n") {
 		return errors.New("invalid security mail configuration or destination")
 	}
@@ -78,7 +118,11 @@ func (s *Sender) Send(ctx context.Context, to, subject, body string) error {
 	if err != nil {
 		return errors.New("security mail data rejected")
 	}
-	message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s", s.cfg.MailFrom, to, subject, body)
+	kind, content, err := mailContent(body, html)
+	if err != nil {
+		return errors.New("mail content unavailable")
+	}
+	message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: %s\r\n\r\n%s", s.cfg.MailFrom, to, subject, kind, content)
 	if _, err := writer.Write([]byte(message)); err != nil {
 		writer.Close()
 		return errors.New("security mail write failed")

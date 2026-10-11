@@ -106,7 +106,15 @@ func (s *Service) Issue(ctx context.Context, email, password string, data Data, 
 	}
 	// Fragment avoids sending the secret to frontend HTTP/access-log handlers.
 	fragment := url.Values{"id": {p.ID}, "token": {token}}.Encode()
-	deliveryErr := s.mailer.Send(ctx, email, "Verify your SIGNET registration", fmt.Sprintf("Verify your email to create your account: %s/register/verify#%s\nThis link expires in 24 hours. Ignore it if you did not register.", s.baseURL, fragment))
+	link := fmt.Sprintf("%s/register/verify#%s", s.baseURL, fragment)
+	var deliveryErr error
+	if branded, ok := s.mailer.(interface {
+		SendVerification(context.Context, string, string) error
+	}); ok {
+		deliveryErr = branded.SendVerification(ctx, email, link)
+	} else {
+		deliveryErr = s.mailer.Send(ctx, email, "Verify your SIGNET registration", fmt.Sprintf("Verify your email to create your account: %s\nThis link expires in 24 hours. Ignore it if you did not register.", link))
+	}
 	status := "delivered"
 	if deliveryErr != nil {
 		status = "delivery_failed"

@@ -1,7 +1,8 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
+import AuthCardLayout from '@/components/layout/AuthCardLayout.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,19 +24,26 @@ async function verify() {
     token = ''
     await router.replace({ name: 'register.step2', params: { id: data.user_id } })
   } catch (err) {
+    if (err?.response?.status === 422) token = ''
     error.value = err?.response?.data?.message || 'Verification temporarily unavailable. Please try again.'
   } finally { busy.value = false }
 }
+onMounted(verify)
 </script>
 
 <template>
-  <main class="container py-5" style="max-width: 640px">
-    <section class="card p-4">
-      <h1 class="h4">Verify your email</h1>
-      <p>Confirm your email to create your account and continue to package selection.</p>
+  <AuthCardLayout back-text="Back to login" back-to="/login">
+    <div class="verification-orb" aria-hidden="true">{{ error ? '!' : '✓' }}</div>
+      <p class="small text-info">SIGNET · EMAIL VERIFICATION</p>
+      <h1 class="h3">{{ busy ? 'Verifying your email…' : error ? 'Let’s get you back on track' : 'Email confirmed' }}</h1>
+      <p class="text-muted" role="status">{{ busy ? 'Please keep this page open. We’re confirming your link securely.' : error ? 'If you have already verified this email, sign in to continue. Otherwise, request a new link through registration.' : 'Taking you to package selection…' }}</p>
       <p v-if="error" class="alert alert-warning" role="alert">{{ error }}</p>
-      <button class="btn btn-primary" :disabled="!valid || busy" @click="verify">{{ busy ? 'Verifying…' : 'Verify email and continue' }}</button>
-      <RouterLink class="mt-3" :to="{ name: 'register.step1' }">Return to registration</RouterLink>
-    </section>
-  </main>
+      <button v-if="error && valid && token" class="btn btn-primary w-100" :disabled="busy" @click="verify">Try again</button>
+      <RouterLink v-if="error" class="d-block mt-3" :to="{ name: 'register.step1' }">Return to registration</RouterLink>
+      <RouterLink v-if="error" class="d-block mt-3" to="/login">Sign in</RouterLink>
+  </AuthCardLayout>
 </template>
+
+<style scoped>
+.verification-orb { display:grid;place-items:center;width:64px;height:64px;border-radius:18px;background:rgba(0,240,255,.08);border:1px solid var(--sg-line-3);color:var(--sg-accent-light);font-size:28px;margin-bottom:24px; }
+</style>
