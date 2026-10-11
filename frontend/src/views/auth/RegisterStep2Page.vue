@@ -25,7 +25,7 @@ const loadError = ref('')
 const packages = ref([])
 const showLowerPackages = ref(false)
 const blockchainEnabled = ref(false)
-const fees = {100:20,500:80,1000:130,2500:280,5000:1030,10000:2030,25000:5030,50000:15030,100000:30030,500000:150030,1000000:400030}
+const fees = {1:0.10,100:20,500:80,1000:130,2500:280,5000:1030,10000:2030,25000:5030,50000:15030,100000:30030,500000:150030,1000000:400030}
 const visiblePackages = computed(() => visiblePackageChoices(packages.value, blockchainEnabled.value, showLowerPackages.value))
 const selected = computed(() => packages.value.find(p => String(p.id) === selectedPackage.value))
 const selectedPackage = ref('')
@@ -97,7 +97,7 @@ async function onSubmit() {
           <option v-for="pack in visiblePackages" :key="pack.id" :value="String(pack.id)">{{ pack.name }} — {{ pack.price }} USDT</option>
         </select>
       </div>
-      <label v-if="blockchainEnabled" class="mt-2"><input v-model="showLowerPackages" type="checkbox" :disabled="loading || submitting" /> Show lower packages (100 / 500 USDT)</label>
+      <label v-if="blockchainEnabled" class="mt-2"><input v-model="showLowerPackages" type="checkbox" :disabled="loading || submitting" /> Show lower / test packages</label>
       <p v-if="blockchainEnabled && selected && fees[selected.price] != null" class="mt-3">Package: {{ selected.price }} USDT. Service fee: {{ fees[selected.price] }} USDT. Required deposit: {{ Number(selected.price) + fees[selected.price] }} USDT. Only the package amount is swapped to SIGNET.</p>
       <button type="submit" class="btn btn-primary mt-4" :disabled="loading || submitting || !selectedPackage">Next</button>
     </form>
