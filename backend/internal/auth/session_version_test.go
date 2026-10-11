@@ -1,9 +1,12 @@
 package auth
 
 import (
-	"signet-backend/internal/models"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"signet-backend/internal/models"
 )
 
 func TestSessionCredentialRevisionInvalidatesOldAndLegacySessions(t *testing.T) {
@@ -25,5 +28,34 @@ func TestSessionCredentialRevisionInvalidatesOldAndLegacySessions(t *testing.T) 
 	c.UserID = 43
 	if s.sessionMatches(c, u) {
 		t.Fatal("other identity accepted")
+	}
+}
+
+// Registration verification used to issue the session from a bare
+// models.User{ID, Role}: its credential version was derived from an empty
+// password, so the very next request rejected it ("Registration ownership
+// required"). A session must round-trip against the stored row.
+func TestIssuedSessionMatchesStoredUserOnNextRequest(t *testing.T) {
+	s := &Service{Secret: []byte(strings.Repeat("k", 32)), Lifetime: time.Hour}
+	stored := &models.User{ID: 42, Role: "user", Password: "$2y$10$storedbcrypthash"}
+
+	if err := s.IssueSession(httptest.NewRecorder(), &models.User{ID: 42, Role: "user"}); err == nil {
+		t.Fatal("session issued from a partial user (no password hash) — it could never validate")
+	}
+
+	rec := httptest.NewRecorder()
+	if err := s.IssueSession(rec, stored); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/api/v1/register/step2/42", nil)
+	for _, c := range rec.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	claims, err := s.parseSession(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.sessionMatches(claims, stored) {
+		t.Fatal("freshly issued session rejected on the next request")
 	}
 }

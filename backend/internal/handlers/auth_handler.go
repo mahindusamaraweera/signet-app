@@ -329,7 +329,16 @@ func verifyRegistrationHandler(d *app.Deps) http.HandlerFunc {
 			httpx.Error(w, 503, "Registration verification temporarily unavailable")
 			return
 		}
-		if err := d.Auth.IssueSession(w, &models.User{ID: id, Role: "user"}); err != nil {
+		// The session must be issued from the stored row: its credential
+		// version is derived from the password hash and re-checked on every
+		// request, so a bare {ID, Role} user produced a session that was
+		// silently rejected ("Registration ownership required" at step 2).
+		var created models.User
+		if err := d.DB.Get(&created, "SELECT * FROM users WHERE id = ?", id); err != nil {
+			httpx.Error(w, 500, "Email verified and account created. Please log in to continue.")
+			return
+		}
+		if err := d.Auth.IssueSession(w, &created); err != nil {
 			httpx.Error(w, 500, "Email verified and account created. Please log in to continue.")
 			return
 		}

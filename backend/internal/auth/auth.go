@@ -62,6 +62,12 @@ type sessionClaims struct {
 }
 
 func (s *Service) IssueSession(w http.ResponseWriter, user *models.User) error {
+	// The credential version comes from the stored password hash and is
+	// re-checked on every request; a session minted from a partial user
+	// (no hash) would be silently rejected later, so refuse it here.
+	if user == nil || user.ID == 0 || user.Password == "" {
+		return errors.New("auth: IssueSession needs the user's stored row (with its password hash)")
+	}
 	loginID := make([]byte, 32)
 	if _, err := rand.Read(loginID); err != nil {
 		return err
