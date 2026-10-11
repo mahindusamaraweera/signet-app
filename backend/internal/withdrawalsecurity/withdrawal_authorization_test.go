@@ -40,3 +40,27 @@ func TestWithdrawalAuthorizationBindsTermsAndSingleUseLifecycle(t *testing.T) {
 		t.Fatal("inconsistent fee authorized")
 	}
 }
+
+// expires_at is a TIMESTAMP(0) that MySQL rounds on insert, and
+// ExpiresAt.Unix() is part of the proof hash: an authorization issued at a
+// fractional second must still be consumable after that round trip.
+func TestWithdrawalAuthorizationSurvivesTimestampRounding(t *testing.T) {
+	key := []byte(strings.Repeat("k", 32))
+	terms, err := NewWithdrawalTerms(42, 2, strings.Repeat("a", 64), "0x"+strings.Repeat("b", 40), "100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, frac := range []time.Duration{0, 300 * time.Millisecond, 500 * time.Millisecond, 700 * time.Millisecond, 999 * time.Millisecond} {
+		now := time.Unix(1800000000, 0).UTC().Add(frac)
+		a, proof, err := NewWithdrawalAuthorization(key, terms, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.ExpiresAt = a.ExpiresAt.Round(time.Second) // what MySQL stores and returns
+		a.Status = "authorized"
+		a.AuthorizedAt = &now
+		if !a.CanConsume(key, proof, terms, now) {
+			t.Fatalf("authorization issued at +%v rejected after storage rounding", frac)
+		}
+	}
+}

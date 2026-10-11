@@ -35,7 +35,10 @@ func New(key []byte, email string, now time.Time) (Pending, string, error) {
 	if _, err := rand.Read(token); err != nil {
 		return Pending{}, "", err
 	}
-	p := Pending{ID: hex.EncodeToString(id), Email: email, Status: "pending_delivery", ExpiresAt: now.UTC().Add(24 * time.Hour)}
+	// Whole seconds: expires_at is a TIMESTAMP(0) and MySQL ROUNDS fractions
+	// on insert, so a sub-second expiry would be read back up to a second
+	// later, change ExpiresAt.Unix() in the hash, and break ~half the links.
+	p := Pending{ID: hex.EncodeToString(id), Email: email, Status: "pending_delivery", ExpiresAt: now.UTC().Add(24 * time.Hour).Truncate(time.Second)}
 	value := hex.EncodeToString(token)
 	p.VerificationHash = p.hash(key, value)
 	return p, value, nil

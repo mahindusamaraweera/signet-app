@@ -38,3 +38,22 @@ func TestRegistrationTokenRequiresDeliveredUnexpiredUnusedProof(t *testing.T) {
 		t.Fatal("weak key accepted")
 	}
 }
+
+// expires_at is a TIMESTAMP(0): MySQL rounds fractional seconds on insert.
+// A link issued at .7 s must still verify after that round trip (it used to
+// fail for ~half of all links because ExpiresAt.Unix() is in the hash).
+func TestRegistrationTokenSurvivesTimestampRounding(t *testing.T) {
+	key := []byte(strings.Repeat("k", 32))
+	for _, frac := range []time.Duration{0, 300 * time.Millisecond, 500 * time.Millisecond, 700 * time.Millisecond, 999 * time.Millisecond} {
+		now := time.Unix(1800000000, 0).Add(frac)
+		p, token, err := New(key, "user@example.com", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.ExpiresAt = p.ExpiresAt.Round(time.Second) // what MySQL stores and returns
+		p.Status = "delivered"
+		if !p.Accepts(key, token, now) {
+			t.Fatalf("link issued at +%v rejected after storage rounding", frac)
+		}
+	}
+}

@@ -34,7 +34,9 @@ func NewWithdrawalAuthorization(key []byte, terms WithdrawalTerms, now time.Time
 	if _, err := rand.Read(proof); err != nil {
 		return WithdrawalAuthorization{}, "", err
 	}
-	a := WithdrawalAuthorization{ID: hex.EncodeToString(id), Terms: terms, Status: "pending", ExpiresAt: now.UTC().Add(10 * time.Minute)}
+	// Whole seconds: expires_at is a TIMESTAMP(0) that MySQL rounds on insert,
+	// and ExpiresAt.Unix() is part of the proof hash below.
+	a := WithdrawalAuthorization{ID: hex.EncodeToString(id), Terms: terms, Status: "pending", ExpiresAt: now.UTC().Add(10 * time.Minute).Truncate(time.Second)}
 	secret := hex.EncodeToString(proof)
 	a.ProofHash = a.hash(key, secret)
 	return a, secret, nil
