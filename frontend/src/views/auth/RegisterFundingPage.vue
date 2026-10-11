@@ -76,7 +76,12 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
         <div v-if="purchase.service_fee_usdt"><dt>Service fee</dt><dd :title="purchase.service_fee_usdt">{{ usdtDisplay(purchase.service_fee_usdt) }} USDT</dd></div>
         <div><dt>Confirmed available</dt><dd :title="purchase.available_usdt">{{ usdtDisplay(purchase.available_usdt) }} USDT</dd></div>
       </dl>
-      <div v-if="purchase.status === 'awaiting_deposit'" class="alert alert-info" role="status">
+      <div v-if="purchase.status === 'awaiting_deposit' && (purchase.last_sync_error || !purchase.last_attempt_at)" class="alert alert-warning" role="status">
+        <strong>Waiting for automatic activation checks</strong>
+        <p class="mb-0 mt-1">{{ purchase.last_sync_error === 'placement_required' ? 'Your placement needs review before this purchase can proceed.' : purchase.last_sync_error ? 'The activation service could not complete its latest check. Your funds remain recorded. Contact support if this persists.' : 'The activation worker has not recorded its first check yet.' }}</p>
+        <p class="small mt-2 mb-0">If your deposit is credited below, do not send another payment just because the package status has not updated.</p>
+      </div>
+      <div v-else-if="purchase.status === 'awaiting_deposit'" class="alert alert-info" role="status">
         <strong :title="purchase.remaining_usdt">{{ usdtDeficitDisplay(purchase.remaining_usdt) }} USDT remaining</strong>
         <p class="mb-0 mt-1">Deposit the remaining amount. Activation starts automatically once sufficient funds are confirmed.</p>
         <details class="small mt-2"><summary>Exact remaining amount</summary>{{ purchase.remaining_usdt }} USDT</details>
@@ -106,7 +111,7 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
 </template>
 
 <style scoped>
-.funding-card { max-width: 760px; margin: 24px 0; border: 1px solid var(--sg-line-3); border-radius: 24px; background: radial-gradient(ellipse at top right,rgba(0,240,255,.08),transparent 60%),var(--sg-panel); box-shadow: var(--sg-shadow); }
+:deep(.funding-card) { max-width: 760px; margin: 24px 0; border: 1px solid var(--sg-line-3); border-radius: 24px; background: radial-gradient(ellipse at top right,rgba(0,240,255,.08),transparent 60%),var(--sg-panel); box-shadow: var(--sg-shadow); }
 .funding-kicker { color: var(--sg-accent-light); font: 600 11px var(--sg-font-mono); letter-spacing: .14em; margin-bottom: 14px; }
 .funding-intro { color: var(--sg-muted); max-width: 530px; }
 .funding-total { padding: 22px; border-radius: 16px; border: 1px solid rgba(0,240,255,.22); background: rgba(0,240,255,.05); margin: 24px 0; }

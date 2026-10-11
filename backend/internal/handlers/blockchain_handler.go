@@ -83,19 +83,21 @@ func RegisterBlockchainRoutes(r chi.Router, d *app.Deps) {
 			return
 		}
 		var result struct {
-			ID                uint64 `db:"id" json:"id"`
-			ReopeningStatus   string `json:"reopening_status,omitempty"`
-			PlacementRequired bool   `json:"placement_required"`
-			Kind              string `db:"purchase_kind" json:"purchase_kind"`
-			Fee               string `db:"service_fee_usdt" json:"service_fee_usdt"`
-			Required          string `db:"required_usdt" json:"required_usdt"`
-			Price             string `db:"package_price" json:"package_price"`
-			Available         string `db:"available_usdt" json:"available_usdt"`
-			Remaining         string `db:"remaining_usdt" json:"remaining_usdt"`
-			Status            string `db:"status" json:"status"`
-			DepositSeen       bool   `db:"deposit_seen" json:"deposit_seen"`
+			ID                uint64  `db:"id" json:"id"`
+			ReopeningStatus   string  `json:"reopening_status,omitempty"`
+			PlacementRequired bool    `json:"placement_required"`
+			Kind              string  `db:"purchase_kind" json:"purchase_kind"`
+			Fee               string  `db:"service_fee_usdt" json:"service_fee_usdt"`
+			Required          string  `db:"required_usdt" json:"required_usdt"`
+			Price             string  `db:"package_price" json:"package_price"`
+			Available         string  `db:"available_usdt" json:"available_usdt"`
+			Remaining         string  `db:"remaining_usdt" json:"remaining_usdt"`
+			LastAttempt       *string `db:"last_attempt_at" json:"last_attempt_at"`
+			LastSyncError     *string `db:"last_sync_error" json:"last_sync_error"`
+			Status            string  `db:"status" json:"status"`
+			DepositSeen       bool    `db:"deposit_seen" json:"deposit_seen"`
 		}
-		if err := d.DB.Get(&result, `SELECT id,purchase_kind,package_price,COALESCE(CAST(service_fee_usdt AS CHAR),'') AS service_fee_usdt,COALESCE(CAST(required_usdt AS CHAR),'') AS required_usdt,available_usdt,remaining_usdt,status,deposit_seen FROM package_purchase_intents WHERE user_id=? ORDER BY id DESC LIMIT 1`, auth.UserFromContext(r.Context()).ID); err != nil {
+		if err := d.DB.Get(&result, `SELECT id,purchase_kind,package_price,COALESCE(CAST(service_fee_usdt AS CHAR),'') AS service_fee_usdt,COALESCE(CAST(required_usdt AS CHAR),'') AS required_usdt,available_usdt,remaining_usdt,status,deposit_seen,CAST(last_attempt_at AS CHAR) AS last_attempt_at,last_sync_error FROM package_purchase_intents WHERE user_id=? ORDER BY id DESC LIMIT 1`, auth.UserFromContext(r.Context()).ID); err != nil {
 			if err == sql.ErrNoRows {
 				httpx.Error(w, 404, "No package selected")
 			} else {

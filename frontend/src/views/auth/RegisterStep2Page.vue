@@ -120,7 +120,7 @@ async function onSubmit() {
 </template>
 
 <style scoped>
-.package-selection-card { max-width:760px;margin:24px 0;border:1px solid var(--sg-line-3);border-radius:24px;background:var(--sg-panel);box-shadow:var(--sg-shadow); }
+:deep(.package-selection-card) { max-width:760px;margin:24px 0;border:1px solid var(--sg-line-3);border-radius:24px;background:var(--sg-panel);box-shadow:var(--sg-shadow); }
 .package-choices { margin:0;padding:0;border:0; }
 .package-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; }
 .package-choice { display:flex;align-items:center;gap:12px;padding:18px;border:1px solid var(--sg-line-3);border-radius:14px;cursor:pointer;background:var(--sg-glass); }

@@ -33,7 +33,7 @@ const restart = computed(() => ({ name: 'register.step1', query: typeof route.qu
 </template>
 
 <style scoped>
-.email-check-card { max-width:560px; margin:24px 0; border:1px solid var(--sg-line-3); border-radius:24px; background:radial-gradient(ellipse at top,rgba(0,240,255,.08),transparent 65%),var(--sg-panel); box-shadow:var(--sg-shadow); }
+:deep(.email-check-card) { max-width:560px; margin:24px 0; border:1px solid var(--sg-line-3); border-radius:24px; background:radial-gradient(ellipse at top,rgba(0,240,255,.08),transparent 65%),var(--sg-panel); box-shadow:var(--sg-shadow); }
 .email-check-icon { display:grid; place-items:center; width:72px; height:72px; border-radius:20px; border:1px solid rgba(0,240,255,.25); color:var(--sg-accent-light); background:rgba(0,240,255,.06); margin-bottom:24px; }
 .email-check-eyebrow { font:600 10px var(--sg-font-mono); letter-spacing:.14em; color:var(--sg-accent-light); }
 .email-check-lead { color:var(--sg-muted); line-height:1.7; }
