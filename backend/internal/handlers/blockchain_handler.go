@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/go-chi/chi/v5"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
 	"signet-backend/internal/app"
@@ -105,12 +106,16 @@ func RegisterBlockchainRoutes(r chi.Router, d *app.Deps) {
 			if err == sql.ErrNoRows {
 				httpx.Error(w, 404, "No package selected")
 			} else {
+				// e.g. "Unknown column 'last_attempt_at'" when a migration is
+				// pending — the reason stays in the server log.
+				log.Printf("blockchain/purchase: user %d: purchase status query failed: %v", auth.UserFromContext(r.Context()).ID, err)
 				httpx.Error(w, 503, "Purchase status temporarily unavailable")
 			}
 			return
 		}
 		if result.Status == "awaiting_reopening" {
 			if err := d.DB.Get(&result.ReopeningStatus, "SELECT status FROM registration_reopening_outbox WHERE purchase_intent_id=? AND user_id=?", result.ID, auth.UserFromContext(r.Context()).ID); err != nil {
+				log.Printf("blockchain/purchase: user %d: reopening status for intent %d failed: %v", auth.UserFromContext(r.Context()).ID, result.ID, err)
 				httpx.Error(w, 503, "Replacement confirmation status temporarily unavailable")
 				return
 			}
@@ -118,6 +123,7 @@ func RegisterBlockchainRoutes(r chi.Router, d *app.Deps) {
 		if result.Kind != "topup" && (result.Status == "awaiting_deposit" || result.Status == "expired") {
 			var placements int
 			if err := d.DB.Get(&placements, "SELECT COUNT(*) FROM user_parents WHERE user_id=? AND node IN ('deactive','active')", auth.UserFromContext(r.Context()).ID); err != nil {
+				log.Printf("blockchain/purchase: user %d: placement status failed: %v", auth.UserFromContext(r.Context()).ID, err)
 				httpx.Error(w, 503, "Placement status temporarily unavailable")
 				return
 			}
