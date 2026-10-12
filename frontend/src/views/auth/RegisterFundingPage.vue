@@ -1,13 +1,24 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import api from '@/api/client'
+import PurchaseActivation from '@/components/PurchaseActivation.vue'
+import { useAuthStore } from '@/store/auth'
 import AuthCardLayout from '@/components/layout/AuthCardLayout.vue'
 import QRCode from 'qrcode'
 import PartialDepositReminder from '@/components/PartialDepositReminder.vue'
 import { usdtDisplay, usdtDeficitDisplay } from '@/utils/usdtDisplay'
+import { activationAction } from '@/utils/purchaseActivation'
 import RegistrationProgress from '@/components/RegistrationProgress.vue'
 
+const authStore = useAuthStore()
+const checking = ref(false)
+const loadingFunding = ref(false)
+function activationBusy(value) {
+  checking.value = value
+  if (value) clearTimeout(timer)
+}
 const wallet = ref(null)
+const fundingReady = computed(() => activationAction(purchase.value, wallet.value)?.ready && !error.value)
 const purchase = ref(null)
 const error = ref('')
 const qr = ref('')
@@ -20,12 +31,22 @@ async function copyAddress() {
 }
 let timer
 let stopped = false
+let refreshInFlight = null
 async function refresh() {
+  if (stopped || checking.value) return
+  if (refreshInFlight) return refreshInFlight
+  loadingFunding.value = true
+  refreshInFlight = loadFunding()
+  try { await refreshInFlight } finally { refreshInFlight = null; loadingFunding.value = false }
+}
+async function loadFunding() {
+  clearTimeout(timer)
   try {
     const [w, p] = await Promise.all([api.post('/blockchain/wallet'), api.get('/blockchain/purchase')])
     if (stopped) return
     wallet.value = w.data.wallet
     purchase.value = p.data.purchase
+    if (purchase.value?.status === 'completed') await authStore.bootstrap()
     error.value = ''
     qr.value = wallet.value?.address ? await QRCode.toDataURL(wallet.value.address) : ''
     try {
@@ -35,7 +56,7 @@ async function refresh() {
   } catch (err) {
     if (!stopped) error.value = err?.response?.data?.message || 'Funding service unavailable. Your account is preserved; please retry.'
   } finally {
-    if (!stopped && purchase.value?.status !== 'completed') timer = setTimeout(refresh, 15000)
+    if (!stopped && !checking.value && purchase.value?.status !== 'completed') timer = setTimeout(refresh, 15000)
   }
 }
 onMounted(refresh)
@@ -44,7 +65,7 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
 
 <template>
   <AuthCardLayout back-text="Back to login" back-to="/login" card-class="funding-card p-4 p-lg-5 w-100">
-    <PartialDepositReminder :purchase="purchase" />
+    <PartialDepositReminder :purchase="fundingReady ? null : purchase" />
     <RegistrationProgress :step="4" />
     <div class="funding-kicker">SIGNET · PACKAGE ACTIVATION</div>
     <h1 class="h3 mb-2">Fund your package</h1>
@@ -74,12 +95,15 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
       <dl class="funding-breakdown">
         <div><dt>Package</dt><dd :title="purchase.package_price">{{ usdtDisplay(purchase.package_price) }} USDT</dd></div>
         <div v-if="purchase.service_fee_usdt"><dt>Service fee</dt><dd :title="purchase.service_fee_usdt">{{ usdtDisplay(purchase.service_fee_usdt) }} USDT</dd></div>
-        <div><dt>Confirmed available</dt><dd :title="purchase.available_usdt">{{ usdtDisplay(purchase.available_usdt) }} USDT</dd></div>
+        <div><dt>Confirmed available</dt><dd :title="wallet?.available ?? purchase.available_usdt">{{ usdtDisplay(wallet?.available ?? purchase.available_usdt) }} USDT</dd></div>
       </dl>
       <div v-if="purchase.status === 'awaiting_deposit' && (purchase.last_sync_error || !purchase.last_attempt_at)" class="alert alert-warning" role="status">
         <strong>Waiting for automatic activation checks</strong>
         <p class="mb-0 mt-1">{{ purchase.last_sync_error === 'placement_required' ? 'Your placement needs review before this purchase can proceed.' : purchase.last_sync_error ? 'The activation service could not complete its latest check. Your funds remain recorded. Contact support if this persists.' : 'The activation worker has not recorded its first check yet.' }}</p>
         <p class="small mt-2 mb-0">If your deposit is credited below, do not send another payment just because the package status has not updated.</p>
+      </div>
+      <div v-else-if="purchase.status === 'awaiting_deposit' && fundingReady" class="alert alert-info" role="status">
+        Your confirmed USDT balance covers the package and service fee. Activation runs automatically, or you can use the button below. No further deposit is needed.
       </div>
       <div v-else-if="purchase.status === 'awaiting_deposit'" class="alert alert-info" role="status">
         <strong :title="purchase.remaining_usdt">{{ usdtDeficitDisplay(purchase.remaining_usdt) }} USDT remaining</strong>
@@ -98,7 +122,8 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
       <div v-else-if="purchase.status === 'expired'" class="alert alert-warning">This purchase has expired. Do not send funds to its old deposit address. Contact support if you already sent a payment.</div>
       <div v-else class="alert alert-info" role="status">Your package is processing automatically: {{ purchase.status }}. No further purchase action is needed.</div>
     </template>
-    <RouterLink v-if="purchase?.status === 'completed'" to="/login" class="btn btn-primary">Continue to login</RouterLink>
+    <PurchaseActivation :purchase="purchase" :wallet="wallet" :disabled="loadingFunding || !!error" @refresh="refresh" @busy="activationBusy" />
+    <RouterLink v-if="purchase?.status === 'completed'" :to="authStore.dashboardRoute" class="btn btn-primary">Continue to dashboard</RouterLink>
     <h2 class="h5 mt-4">Recent USDT deposits</h2>
     <p v-if="historyError" role="status">{{ historyError }}</p>
     <p v-if="!historyError && !deposits.length" class="funding-empty">Waiting for your first deposit.<br /><small>It will appear here once detected. You don’t need to submit a payment receipt.</small></p>

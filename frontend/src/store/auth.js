@@ -7,6 +7,7 @@ import api from '@/api/client'
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null,
+    registrationPath: '',
     authenticated: false,
     bootstrapped: false,
   }),
@@ -16,6 +17,7 @@ export const useAuthStore = defineStore('auth', {
     isAdmin: (state) => state.user?.role === 'admin',
     isAgent: (state) => state.user?.role === 'agent',
     isUser: (state) => state.user?.role === 'user',
+    landingRoute: (state) => state.registrationPath || (state.user ? `/${state.user.role}/dashboard` : '/login'),
     dashboardRoute: (state) => (state.user ? `/${state.user.role}/dashboard` : '/login'),
   },
   actions: {
@@ -24,9 +26,11 @@ export const useAuthStore = defineStore('auth', {
         const { data } = await api.get('/me')
         this.authenticated = !!data.authenticated
         this.user = data.user || null
+        this.registrationPath = data.registration_path || ''
       } catch {
         this.authenticated = false
         this.user = null
+        this.registrationPath = ''
       } finally {
         this.bootstrapped = true
       }
@@ -48,6 +52,7 @@ export const useAuthStore = defineStore('auth', {
     forceLogout() {
       this.authenticated = false
       this.user = null
+      this.registrationPath = ''
       if (window.location.pathname !== '/login') {
         window.location.assign('/login')
       }

@@ -3,9 +3,9 @@ package blockchain
 import "fmt"
 
 type PackageTerms struct {
-	Fee          string
-	BonusPercent int64
-	Required     string
+	Fee          string `json:"service_fee_usdt"`
+	BonusPercent int64  `json:"bonus_percent"`
+	Required     string `json:"required_usdt"`
 }
 
 func CommercialPackageTerms(price int64) (PackageTerms, error) {

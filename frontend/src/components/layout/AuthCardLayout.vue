@@ -12,6 +12,7 @@
 // Three register views link "Back to log in" to a broken relative
 // "./sign-in.html"; that link goes to /login here instead.
 defineProps({
+  embedded: { type: Boolean, default: false },
   showBackLink: { type: Boolean, default: true },
   backText: { type: String, default: 'Back to Homepage' },
   backTo: { type: String, default: '/' },
@@ -22,7 +23,7 @@ defineProps({
 </script>
 
 <template>
-  <main>
+  <component :is="embedded ? 'div' : 'main'" :class="{ 'embedded-auth-card': embedded }">
     <section class="auth-layout-shell bg-soft d-flex align-items-center">
       <div class="container">
         <p v-if="showBackLink && backPlacement === 'container'" class="text-center">
@@ -46,7 +47,7 @@ defineProps({
         </div>
       </div>
     </section>
-  </main>
+  </component>
 </template>
 
 <style scoped>

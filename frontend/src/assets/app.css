@@ -5,11 +5,7 @@
    it used to hold hand-rolled approximations of those classes as a stopgap
    before the real theme CSS was wired in, and letting both define the same
    class would fight over which one wins.
-   .badge-success/.badge-warning are intentionally NOT defined here either:
-   the original Blade views use those exact class names but neither
-   volt.css nor custome.css defines them, so the original genuinely renders
-   the KYC verified/pending status as unstyled plain text — reproduce that
-   quirk verbatim rather than inventing a pill style for it. */
+   Shared page polish and status badges are defined in workspace.css.  */
 
 /* Genealogy tree (geneology/index.blade.php) */
 .geneology-tree {

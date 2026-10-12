@@ -95,7 +95,7 @@ onBeforeUnmount(() => { stopped = true; clearProof(); cancelPassword.value = '';
 </script>
 
 <template>
-  <DashboardLayout><main class="container py-4">
+  <DashboardLayout><div class="wallet-form-page">
     <h1>Withdraw SIGNET</h1>
     <p>You receive 97% in SIGNET. The deducted 3% is converted to USDT and paid to the withdrawal-fee address. No second fee is charged.</p>
     <p><RouterLink to="/wallet/security">Set up email, Authenticator and withdrawal address</RouterLink> · <RouterLink to="/wallet/deposits">Payout and fee history</RouterLink></p>
@@ -116,7 +116,8 @@ onBeforeUnmount(() => { stopped = true; clearProof(); cancelPassword.value = '';
       </template>
       <button v-else-if="stage === 'authorized'" class="btn btn-primary" :disabled="busy || uncertain || !password" @click="act('queue')">Queue approved withdrawal</button>
     </section>
-    <h2>Recent local requests</h2><p>Queued means awaiting custody processing; submitted means reserved remotely, not paid. Use payout history for chain and fee confirmation. Reloading clears your approval proof, not financial records.</p>
+    <h2 class="h5 mt-4">Recent withdrawal requests</h2><p>Queued means awaiting custody processing; submitted means reserved remotely, not paid. Use payout history for chain and fee confirmation. Reloading clears your approval proof, not financial records.</p>
+    <p v-if="!busy && !error && !requests.length" class="wallet-empty">No withdrawal requests yet.</p>
     <ul class="list-group"><li v-for="r in requests" :key="r.id" class="list-group-item text-break">{{ r.terms.gross }} SIGNET → {{ r.terms.destination }}<br>{{ r.authorization_status }}<span v-if="r.queue_status"> / {{ r.queue_status }}</span><span v-if="r.remote_withdrawal_id"> · Custody request {{ r.remote_withdrawal_id }}</span>
       <p v-if="r.queue_status === 'cancellation_review_required'" class="text-danger">Cancellation requires reconciliation. Check payout history and contact support; no refund is confirmed.</p>
       <button v-if="cancellationEnabled && ['pending', 'authorized', 'consumed', 'expired'].includes(r.authorization_status) && !['cancel_requested', 'cancelled', 'cancellation_review_required'].includes(r.queue_status)" class="btn btn-outline-danger ms-2" :disabled="busy" @click="cancelTarget = r; cancelPassword = ''; cancelAcknowledged = false">Request cancellation</button>
@@ -128,5 +129,5 @@ onBeforeUnmount(() => { stopped = true; clearProof(); cancelPassword.value = '';
       <label><input v-model="cancelAcknowledged" type="checkbox" :disabled="busy" /> I want to cancel this exact request.</label>
       <div class="mt-3"><button class="btn btn-danger" :disabled="busy || !cancelPassword || !cancelAcknowledged" @click="cancelRequest">Request cancellation</button><button class="btn btn-outline-secondary ms-2" :disabled="busy" @click="cancelTarget = null; cancelPassword = ''; cancelAcknowledged = false">Keep request</button></div>
     </section>
-  </main></DashboardLayout>
+  </div></DashboardLayout>
 </template>

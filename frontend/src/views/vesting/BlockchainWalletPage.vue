@@ -1,17 +1,30 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import api from '@/api/client'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
 import QRCode from 'qrcode'
+import AssetAmount from '@/components/AssetAmount.vue'
+import { usdtDeficitDisplay } from '@/utils/usdtDisplay'
+import { activationAction } from '@/utils/purchaseActivation'
+import PurchaseActivation from '@/components/PurchaseActivation.vue'
 import PartialDepositReminder from '@/components/PartialDepositReminder.vue'
 
 const wallet = ref(null)
 const qr = ref('')
+const copyMessage = ref('')
+async function copyAddress() {
+  try {
+    await navigator.clipboard.writeText(wallet.value.address)
+    copyMessage.value = 'Address copied'
+  } catch { copyMessage.value = 'Select the address below and copy it from your browser.' }
+}
+function statusLabel(value) { return String(value || 'Pending').replaceAll('_', ' ') }
 const deposits = ref([])
 const nextCursor = ref(null)
 const error = ref('')
 const historyError = ref('')
 const busy = ref(false)
+const activating = ref(false)
 const historyBusy = ref(false)
 const withdrawals = ref([])
 const withdrawalCursor = ref(null)
@@ -19,6 +32,7 @@ const withdrawalError = ref('')
 const withdrawalBusy = ref(false)
 const purchase = ref(null)
 const purchaseError = ref('')
+const fundingReady = computed(() => activationAction(purchase.value, wallet.value)?.ready && !error.value && !purchaseError.value)
 let stopped = false
 let timer
 
@@ -50,7 +64,7 @@ async function withdrawalHistory(older = false) {
 }
 
 async function refresh() {
-  if (busy.value) return
+  if (stopped || busy.value || activating.value) return
   busy.value = true
   try {
     const { data } = await api.post('/blockchain/wallet')
@@ -81,66 +95,77 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
 
 <template>
   <DashboardLayout>
-    <PartialDepositReminder :purchase="purchase" />
-    <h1 class="h3">My deposit wallet</h1>
-    <p>This wallet belongs to your existing account. Provisioning it does not buy a package, restart vesting or change your income cap.</p>
+    <PartialDepositReminder :purchase="fundingReady ? null : purchase" />
+    <div class="page-heading">
+      <div><p class="wallet-eyebrow">DEPOSIT & ACTIVITY</p><h1>My deposit wallet</h1><p>Fund your package and track your confirmed balances.</p></div>
+      <button class="btn btn-outline-primary" :disabled="busy || activating || historyBusy" @click="refresh">{{ busy ? 'Refreshing…' : 'Refresh wallet' }}</button>
+    </div>
     <p v-if="error" class="alert alert-warning" role="alert">{{ error }}</p>
-    <button class="btn btn-primary mb-3" :disabled="busy || historyBusy" @click="refresh">{{ busy ? 'Loading…' : 'Refresh wallet' }}</button>
-    <section v-if="wallet" class="card p-3 mb-3">
-      <h2 class="h5">USDT on BSC — chain {{ wallet.chain_id }}</h2>
-      <p>Confirmed available USDT: {{ wallet.available }}</p>
-      <div v-if="wallet.balances" class="mb-3">
-        <h3 class="h6">Confirmed ledger balances</h3>
-        <p v-for="asset in ['USDT', 'SIGNET']" :key="asset" class="mb-1">{{ asset }} — Available: {{ wallet.balances[asset].available }} · Locked: {{ wallet.balances[asset].locked }} · Pending withdrawal: {{ wallet.balances[asset].pending_withdrawal }}</p>
-        <p class="small text-muted">Available SIGNET includes only settled ledger credits. Locked vesting and the per-second progress estimate are not spendable. Withdrawal availability depends on security setup and enabled processing.</p>
-      </div>
+    <p v-if="busy && !wallet" class="wallet-empty" role="status">Loading your wallet…</p>
+    <div v-if="wallet" class="balance-grid">
+      <section class="balance-tile balance-tile-accent"><span>Available USDT</span><strong><AssetAmount :value="wallet.available" asset="USDT" /></strong><small>Confirmed funds for your package</small></section>
+      <section class="balance-tile"><span>Available SIGNET</span><strong><AssetAmount :value="wallet.balances?.SIGNET?.available" asset="SIGNET" /></strong><small>Settled credits in your wallet</small></section>
+      <section class="balance-tile"><span>Locked SIGNET</span><strong><AssetAmount :value="wallet.balances?.SIGNET?.locked" asset="SIGNET" /></strong><small>Follow scheduled releases in <RouterLink to="/wallet/vesting">vesting</RouterLink></small></section>
+    </div>
+    <div class="deposit-workspace">
+    <section v-if="wallet" class="card wallet-panel">
+      <div class="panel-heading"><h2>Deposit USDT</h2><span class="wallet-network-note">BSC · Chain {{ wallet.chain_id }}</span></div>
       <template v-if="wallet.provisioning_status === 'ready'">
-        <img v-if="qr" :src="qr" alt="Personal deposit address QR code" width="200" height="200" />
-        <p class="text-break mt-2"><code>{{ wallet.address }}</code></p>
-        <p>Send only USDT using the configured BSC network. Deposits require blockchain confirmation before credit.</p>
-        <p>Select a top-up package before funding it. Unassigned deposits remain in your wallet and do not automatically extend your income cap.</p>
+        <div class="deposit-address-layout">
+          <img v-if="qr" :src="qr" alt="Personal deposit address QR code" width="176" height="176" />
+          <div class="deposit-address-details"><h3>Your personal address</h3><p>Scan with your wallet or copy the address below.</p><code class="address-box">{{ wallet.address }}</code><button class="btn btn-outline-primary mt-3" @click="copyAddress">Copy address</button><p v-if="copyMessage" class="small mt-2 mb-0" role="status">{{ copyMessage }}</p></div>
+        </div>
+        <div class="network-guidance"><strong>Send USDT on BSC only</strong><p>Funds appear after blockchain confirmation. Select a package before funding; unassigned deposits stay in your wallet.</p></div>
       </template>
-      <p v-else role="status">Your address is being prepared. Refresh to check again.</p>
+      <p v-else class="wallet-empty" role="status">Your deposit address is being prepared. Refresh to check again.</p>
+      <details v-if="wallet.balances" class="ledger-details"><summary>View all ledger balances</summary><div class="table-responsive"><table class="table"><caption class="small">Only available settled credits are spendable. Withdrawal security and processing requirements apply.</caption><thead><tr><th>Asset</th><th>Available</th><th>Locked</th><th>Pending withdrawal</th></tr></thead><tbody><tr v-for="asset in ['USDT', 'SIGNET']" :key="asset"><th>{{ asset }}</th><td><AssetAmount :value="wallet.balances[asset]?.available" :asset="asset" /></td><td><AssetAmount :value="wallet.balances[asset]?.locked" :asset="asset" /></td><td><AssetAmount :value="wallet.balances[asset]?.pending_withdrawal" :asset="asset" /></td></tr></tbody></table></div></details>
     </section>
+    <section v-if="wallet && !busy && !error && !purchase && !purchaseError" class="card wallet-panel"><p class="wallet-eyebrow">PACKAGE FUNDING</p><h2>No pending package</h2><p>Your wallet keeps any unassigned funds. Choose a top-up to extend your income cap.</p><RouterLink to="/buy-package" class="btn btn-primary">Choose a package</RouterLink></section>
     <p v-if="purchaseError" class="alert alert-warning" role="status">{{ purchaseError }}</p>
-    <section v-if="purchase" class="card p-3 mb-3">
-      <h2 class="h5">{{ purchase.purchase_kind === 'topup' ? 'Top-up' : 'Package purchase' }}</h2>
-      <p>Package: {{ purchase.package_price }} USDT</p>
-      <p v-if="purchase.service_fee_usdt">Service fee: {{ purchase.service_fee_usdt }} USDT</p>
-      <p v-if="purchase.required_usdt">Required deposit: {{ purchase.required_usdt }} USDT</p>
+    <section v-if="purchase" class="card wallet-panel purchase-panel">
+      <p class="wallet-eyebrow">PACKAGE FUNDING</p>
+      <h2>{{ purchase.purchase_kind === 'topup' ? 'Top-up' : 'Package purchase' }}</h2>
+      <dl class="purchase-breakdown"><div><dt>Selected package</dt><dd><AssetAmount :value="purchase.package_price" asset="USDT" /></dd></div><div v-if="purchase.service_fee_usdt"><dt>Service fee</dt><dd><AssetAmount :value="purchase.service_fee_usdt" asset="USDT" /></dd></div><div v-if="purchase.required_usdt" class="purchase-total"><dt>Total required</dt><dd><AssetAmount :value="purchase.required_usdt" asset="USDT" /></dd></div></dl>
       <p v-if="purchase.placement_required" class="alert alert-warning" role="status">Your deposit wallet and funds remain preserved. A new available placement is required before package activation; depositing more does not restore the old placement.</p>
-      <p v-else-if="purchase.status === 'awaiting_deposit'" role="status">Deposit another {{ purchase.remaining_usdt }} USDT. Any confirmed partial deposit preserves your account.</p>
+      <p v-else-if="purchase.status === 'awaiting_deposit' && fundingReady" role="status">Your confirmed balance covers this package and its service fee. Activate below or wait for automatic activation. No additional deposit is needed.</p>
+      <div v-else-if="purchase.status === 'awaiting_deposit'" role="status">Remaining deposit: <strong :title="purchase.remaining_usdt">{{ usdtDeficitDisplay(purchase.remaining_usdt) }} USDT</strong>. Any confirmed partial deposit preserves your account.<details class="small mt-2"><summary>Exact remaining amount</summary>{{ purchase.remaining_usdt }} USDT</details></div>
       <p v-else-if="purchase.status === 'awaiting_reopening' && purchase.reopening_status === 'review_required'" class="alert alert-warning" role="status">Replacement confirmation requires support review. Funds remain preserved and package funding is blocked. Do not submit another replacement or deposit again to resolve this state.</p>
       <p v-else-if="purchase.status === 'awaiting_reopening'" role="status">Your replacement placement is awaiting custody confirmation. Funds remain preserved; package funding will remain blocked until confirmation. Do not submit another replacement.</p>
       <p v-else-if="purchase.status === 'awaiting_commission_settlement'" role="status">Funding is confirmed. Team commissions and company USDT settlement are processing. Your cap will extend after settlement; do not deposit again for this purchase.</p>
       <p v-else-if="purchase.status === 'completed'" role="status">{{ purchase.purchase_kind === 'topup' ? 'Top-up complete: your income cap has increased. No new purchaser bonus or vesting was created.' : 'Package active: your first-purchase allocation is managed in your vesting wallet.' }}</p>
       <p v-else role="status">Purchase status: {{ purchase.status }}. Funds and financial records remain preserved.</p>
+      <PurchaseActivation :purchase="purchase" :wallet="wallet" :disabled="busy || !!error || !!purchaseError" @refresh="refresh" @busy="activating = $event" />
     </section>
-    <h2 class="h5">Deposit history</h2>
+    </div>
+    <section class="card wallet-panel activity-panel">
+    <div class="panel-heading"><h2>Deposit history</h2><span class="small text-muted">{{ deposits.length }} loaded</span></div>
     <p v-if="historyError" class="alert alert-warning" role="alert">{{ historyError }}</p>
-    <p v-if="!historyBusy && !deposits.length">No deposit records loaded.</p>
-    <section v-for="deposit in deposits" :key="deposit.id" class="border rounded p-2 mb-2">
-      <p>{{ deposit.amount }} USDT · {{ deposit.status }} · {{ deposit.confirmations }} confirmations</p>
+    <p v-if="!historyBusy && !historyError && !deposits.length" class="wallet-empty">No deposits yet. Your confirmed transactions will appear here.</p>
+    <section v-for="deposit in deposits" :key="deposit.id" class="activity-record">
+      <div class="activity-record-heading"><strong><AssetAmount :value="deposit.amount" asset="USDT" /></strong><span class="wallet-status" :class="{ settled: ['credited', 'confirmed', 'swept'].includes(deposit.status) }">{{ statusLabel(deposit.status) }}</span></div><p class="small text-muted">{{ deposit.confirmations }} confirmations</p>
       <p class="text-break">Transaction: {{ deposit.tx_hash }} · Log {{ deposit.log_index }}</p>
       <p class="mb-0">{{ deposit.swept_at ? 'Swept to treasury; your ledger entitlement is retained.' : 'Not yet swept.' }}</p>
     </section>
     <button v-if="nextCursor" class="btn btn-secondary" :disabled="historyBusy || busy" @click="history(true)">Load older deposits</button>
-    <h2 class="h5 mt-4">Withdrawal history</h2>
+    </section>
+    <section class="card wallet-panel activity-panel">
+    <div class="panel-heading"><h2>Withdrawal history</h2><RouterLink to="/wallet/withdraw">Withdraw SIGNET →</RouterLink></div>
     <p class="small text-muted">SIGNET withdrawals pay 97% to the user. The deducted 3% is converted to USDT for the fee address when fee processing is enabled; its confirmation is shown separately below.</p>
     <p v-if="withdrawalError" class="alert alert-warning" role="alert">{{ withdrawalError }}</p>
-    <p v-if="!withdrawalBusy && !withdrawalError && !withdrawals.length">No withdrawal records loaded.</p>
-    <section v-for="withdrawal in withdrawals" :key="withdrawal.id" class="border rounded p-2 mb-2">
-      <p>{{ withdrawal.amount }} {{ withdrawal.asset }} · Fee {{ withdrawal.fee }} · Net {{ withdrawal.net_amount }} · {{ withdrawal.status }}</p>
+    <p v-if="!withdrawalBusy && !withdrawalError && !withdrawals.length" class="wallet-empty">No withdrawals yet. Track your payouts here once requested.</p>
+    <section v-for="withdrawal in withdrawals" :key="withdrawal.id" class="activity-record">
+      <div class="activity-record-heading"><strong><AssetAmount :value="withdrawal.net_amount" :asset="withdrawal.asset" /></strong><span class="wallet-status" :class="{ settled: withdrawal.status === 'confirmed' }">{{ statusLabel(withdrawal.status) }}</span></div><p class="small">Gross <AssetAmount :value="withdrawal.amount" :asset="withdrawal.asset" /> · Fee <AssetAmount :value="withdrawal.fee" :asset="withdrawal.asset" /></p>
       <p class="text-break">Destination: {{ withdrawal.to_address }}</p>
       <p class="text-break mb-0">{{ withdrawal.tx_hash ? `Transaction: ${withdrawal.tx_hash}` : 'No transaction hash recorded yet.' }}</p>
       <div v-if="withdrawal.fee_payment" class="small mt-2">
-        <p class="mb-1">Fee conversion: {{ withdrawal.fee_payment.status }} · {{ withdrawal.fee_payment.signet_amount }} SIGNET · {{ withdrawal.fee_payment.received_usdt == null ? 'USDT receipt not confirmed' : `${withdrawal.fee_payment.received_usdt} USDT received` }}</p>
+        <p class="mb-1">Fee conversion: {{ statusLabel(withdrawal.fee_payment.status) }} · <AssetAmount :value="withdrawal.fee_payment.signet_amount" asset="SIGNET" /> · <span v-if="withdrawal.fee_payment.received_usdt == null">USDT receipt not confirmed</span><span v-else><AssetAmount :value="withdrawal.fee_payment.received_usdt" asset="USDT" /> received</span></p>
         <p class="text-break mb-1">Fee destination: {{ withdrawal.fee_payment.to_address }}</p>
         <p class="text-break mb-0">{{ withdrawal.fee_payment.tx_hash ? `Fee transaction: ${withdrawal.fee_payment.tx_hash}` : 'Fee transaction not submitted yet.' }}</p>
       </div>
       <p v-else class="small mt-2 mb-0">No separate fee-conversion record is available for this withdrawal.</p>
     </section>
     <button v-if="withdrawalCursor" class="btn btn-secondary" :disabled="withdrawalBusy || busy" @click="withdrawalHistory(true)">Load older withdrawals</button>
+    </section>
     <RouterLink to="/wallet/vesting" class="btn btn-link">View SIGNET vesting</RouterLink>
     <RouterLink to="/wallet/tier-link" class="btn btn-link">Connect my Tier account</RouterLink>
   </DashboardLayout>

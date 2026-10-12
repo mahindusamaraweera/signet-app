@@ -27,7 +27,6 @@ const loadError = ref('')
 const packages = ref([])
 const showLowerPackages = ref(false)
 const blockchainEnabled = ref(false)
-const fees = {1:0.10,100:20,500:80,1000:130,2500:280,5000:1030,10000:2030,25000:5030,50000:15030,100000:30030,500000:150030,1000000:400030}
 const visiblePackages = computed(() => visiblePackageChoices(packages.value, blockchainEnabled.value, showLowerPackages.value))
 const selected = computed(() => packages.value.find(p => String(p.id) === selectedPackage.value))
 const selectedPackage = ref('')
@@ -107,10 +106,10 @@ async function onSubmit() {
       </fieldset>
       <p v-if="errors.package" class="text-danger mt-2" role="alert">{{ errors.package[0] }}</p>
       <label v-if="blockchainEnabled" class="small text-muted mt-3"><input v-model="showLowerPackages" type="checkbox" :disabled="loading || submitting" /> Show lower / test packages</label>
-      <section v-if="blockchainEnabled && selected && fees[selected.price] != null" class="package-summary mt-4" aria-label="Selected package cost">
+      <section v-if="blockchainEnabled && selected && selected.commercial_terms" class="package-summary mt-4" aria-label="Selected package cost">
         <h2 class="h6">Your deposit summary</h2>
-        <dl><div><dt>Package</dt><dd>{{ usdtDisplay(selected.price) }} USDT</dd></div><div><dt>Service fee</dt><dd>{{ usdtDisplay(fees[selected.price]) }} USDT</dd></div>
-        <div class="package-summary-total"><dt>Total to deposit</dt><dd>{{ usdtDisplay(Number(selected.price) + fees[selected.price]) }} USDT</dd></div></dl>
+        <dl><div><dt>Package</dt><dd>{{ usdtDisplay(selected.price) }} USDT</dd></div><div><dt>Service fee</dt><dd>{{ usdtDisplay(selected.commercial_terms.service_fee_usdt) }} USDT</dd></div>
+        <div class="package-summary-total"><dt>Total to deposit</dt><dd>{{ usdtDisplay(selected.commercial_terms.required_usdt) }} USDT</dd></div></dl>
         <p class="small mb-0 text-muted">Only the package amount is swapped to SIGNET. The service fee is paid separately. You’ll receive your personal deposit address on the next screen.</p>
       </section>
       <button type="submit" class="btn btn-primary w-100 mt-4" :disabled="loading || submitting || !!loadError || !selectedPackage">{{ submitting ? 'Preparing next step…' : blockchainEnabled ? 'Continue to funding' : 'Continue' }}</button>
@@ -121,11 +120,15 @@ async function onSubmit() {
 
 <style scoped>
 :deep(.package-selection-card) { max-width:760px;margin:24px 0;border:1px solid var(--sg-line-3);border-radius:24px;background:var(--sg-panel);box-shadow:var(--sg-shadow); }
-.package-choices { margin:0;padding:0;border:0; }
-.package-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; }
-.package-choice { display:flex;align-items:center;gap:12px;padding:18px;border:1px solid var(--sg-line-3);border-radius:14px;cursor:pointer;background:var(--sg-glass); }
+.package-choices { min-width:0;width:100%;margin:0;padding:0;border:0; }
+/* Volt floats legends; the hidden input following this legend cannot clear
+   that float, leaving the grid squeezed beside the full-width heading. */
+.package-choices > legend { float:none;width:100%;margin-bottom:16px; }
+.package-grid { clear:both;width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; }
+.package-choice { min-width:0;margin:0;display:flex;align-items:center;gap:12px;padding:18px;border:1px solid var(--sg-line-3);border-radius:14px;cursor:pointer;background:var(--sg-glass); }
 .package-choice.selected { border-color:var(--sg-accent);background:rgba(0,240,255,.07); }
-.package-choice input { accent-color:var(--sg-accent);flex-shrink:0; }
+.package-choice input { accent-color:var(--sg-accent);flex:0 0 16px;width:16px;height:16px;margin:0; }
+.package-choice > span { min-width:0; }
 .package-choice small { display:block;color:var(--sg-muted);margin-bottom:6px;overflow-wrap:anywhere; }
 .package-choice strong { font-size:20px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere; }
 .package-choice em { font-style:normal;font-size:11px;color:var(--sg-accent-light); }

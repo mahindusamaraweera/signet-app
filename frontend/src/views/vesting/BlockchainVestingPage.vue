@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { vestingProgress } from '@/utils/vestingProgress'
 import api from '@/api/client'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
+import AssetAmount from '@/components/AssetAmount.vue'
 import { useAuthStore } from '@/store/auth'
 
 const props = defineProps({ admin: { type: Boolean, default: false } })
@@ -119,16 +120,16 @@ onUnmounted(() => { clearInterval(tickTimer); clearInterval(refreshTimer) })
       <input id="vesting-user" v-model="userId" class="form-control" inputmode="numeric" required :disabled="Object.keys(pending).length > 0" />
       <button class="btn btn-primary mt-2" :disabled="busy">Load vesting</button>
     </form>
-    <p v-if="!busy && !schedules.length">No vesting schedules loaded.</p>
+    <p v-if="!busy && !error && !schedules.length" class="wallet-empty">No vesting schedules yet. Your allocation will appear after package activation.</p>
     <section v-for="s in schedules" :key="s.id" class="card p-3 mb-3">
       <h2 class="h5">Vesting #{{ s.id }} — {{ s.status }}</h2>
-      <p>Total: {{ s.total_amount }} SIGNET · Released: {{ s.released_amount }} SIGNET</p>
+      <div class="vesting-summary"><div><span>Total allocation</span><strong><AssetAmount :value="s.total_amount" asset="SIGNET" /></strong></div><div><span>Released to wallet</span><strong><AssetAmount :value="s.released_amount" asset="SIGNET" /></strong></div></div>
       <div v-if="s.progress_estimate" class="mb-3">
         <p class="mb-1">Estimated vesting progress</p>
         <output class="vesting-odometer" aria-live="off">{{ vestingProgress(s, elapsedSinceFetch) ?? 'Refresh to see current estimate' }}<span v-if="vestingProgress(s, elapsedSinceFetch) !== null"> SIGNET</span></output>
         <p class="small text-muted">Display estimate only, updated each second. Tokens settle daily; this number is not a spendable wallet balance.</p>
       </div>
-      <p>Start: {{ s.starts_at }} · Lock ends: {{ s.cliff_ends_at || 'No cliff' }} · Completes: {{ s.ends_at }}</p>
+      <dl class="vesting-dates"><div><dt>Start date</dt><dd>{{ s.starts_at }}</dd></div><div><dt>Lock ends</dt><dd>{{ s.cliff_ends_at || 'No cliff' }}</dd></div><div><dt>Completion</dt><dd>{{ s.ends_at }}</dd></div></dl>
       <div v-if="!admin && (s.existing_user_switch_available || s.tier_switch_review_available || switchRequests[s.id])" class="mb-3">
         <p>You may keep your current method. Option 1 releases over 10,000 days. Option 2 waits 2,000 days from purchase, then releases over 7,500 days. Existing-user switches spread the remaining allocation over 10,000 days.</p>
         <button v-if="s.existing_user_switch_available && !switchPreviews[s.id] && !switchRequests[s.id]" class="btn btn-outline-primary" :disabled="busy" @click="previewSwitch(s)">Review 10,000-day switch</button>

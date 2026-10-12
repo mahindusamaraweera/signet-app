@@ -115,6 +115,55 @@ The scheduler runs recurring jobs (mining updates, weekly pool sums, share
 calculations) in-process on a ticker — running it on every instance would
 duplicate those jobs against the shared database.
 
+### Automatic package activation
+
+No separate cron entry is needed for the Go API. It reconciles purchases on
+startup and every minute while the API service stays running. On the one API
+instance that runs background jobs, configure its `EnvironmentFile`:
+
+```dotenv
+ENABLE_SCHEDULER=true
+BLOCKCHAIN_ENABLED=true
+BLOCKCHAIN_SERVICE_URL=https://your-custody-service.example
+BLOCKCHAIN_SERVICE_TOKEN=your-server-only-service-credential
+```
+
+Use your actual custody service URL and credential. The custody service must
+also have its own deposit scanner, confirmation processing and purchase queues
+running; the Go scheduler cannot replace them. Top-ups additionally require
+`BLOCKCHAIN_TOPUP_ENABLED=true` and the matching custody top-up/commission
+processing. Keep `REGISTRATION_EXPIRY_ENABLED` independent from activation;
+turning on activation does not require enabling unpaid-account deletion.
+
+Before restarting the API, check/apply the repository migrations with the
+configured database environment. In particular, migration
+`033_purchase_sync_diagnostics.sql` supplies the fields shown on the funding
+page. From `backend/`:
+
+```bash
+go run ./cmd/migrate status
+go run ./cmd/migrate up
+sudo systemctl restart signet-api
+sudo systemctl status signet-api --no-pager
+sudo journalctl -u signet-api --since '10 minutes ago' --no-pager
+```
+
+After a confirmed deposit, use **Refresh wallet** to check the available USDT,
+selected package and service fee. **Activate package** is an optional fallback:
+it checks/resumes the same purchase intent, verifies ownership and delegates
+balance reservation to custody. It can run with the Go scheduler disabled,
+but still needs custody processing. Completed purchases hide the action;
+processing purchases offer **Check activation**. Insufficient confirmed funds
+never authorize activation. Retrying does not create another purchase or debit.
+
+If a funded package stays pending, inspect the user's latest
+`package_purchase_intents` row: `status`, `deposit_seen`, `available_usdt`,
+`remaining_usdt`, `last_attempt_at` and `last_sync_error`. No recorded attempt
+points to scheduler/service setup; a recorded error requires checking the API
+and custody logs. A placement review or replacement confirmation must be
+resolved through its supported flow. Do not mark `user_packages` active with a
+manual SQL update: that bypasses custody confirmation, commissions and vesting.
+
 ## 4. Frontend
 
 ### Build

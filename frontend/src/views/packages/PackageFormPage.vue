@@ -82,17 +82,17 @@ onMounted(() => {
 
         <div class="mb-3">
           <label>Price</label>
-          <input v-model="form.price" type="number" step="0.01" name="price" class="form-control" required />
+          <input v-model="form.price" type="number" step="1" min="1" max="2147483647" name="price" class="form-control" required />
         </div>
 
         <div class="mb-3">
           <label>Commission</label>
-          <input v-model="form.commission" type="number" step="0.01" name="commission" class="form-control" required />
+          <input v-model="form.commission" type="number" step="1" min="0" max="100" name="commission" class="form-control" required />
         </div>
 
         <div class="mb-3">
           <label>Rank</label>
-          <input v-model="form.rank" type="text" name="rank" class="form-control" required />
+          <input v-model="form.rank" type="text" name="rank" class="form-control" />
         </div>
 
         <div class="mb-3">

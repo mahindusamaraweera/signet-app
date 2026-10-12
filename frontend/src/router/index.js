@@ -97,10 +97,9 @@ router.beforeEach(async (to) => {
   }
 
   if (to.meta.public) {
-    // Logged-in users hitting /login or / should land on their dashboard,
-    // matching the original's `guest` middleware redirect behavior.
+    // Resume pending registration; activated users return to their dashboard.
     if ((to.name === 'login' || to.name === 'home') && auth.authenticated) {
-      return auth.dashboardRoute
+      return auth.landingRoute
     }
     return true
   }
