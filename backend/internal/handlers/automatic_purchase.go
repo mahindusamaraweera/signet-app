@@ -25,25 +25,8 @@ func StartAutomaticPurchases(d *app.Deps) {
 				log.Printf("purchase intents: %v", err)
 			} else {
 				for _, id := range ids {
-					// Rotate failures too; unavailable policies/services must not starve
-					// all other funded purchases behind the first batch.
-					if _, err := d.DB.Exec("UPDATE package_purchase_intents SET last_checked_at=NOW(),last_attempt_at=NOW() WHERE id=? AND status NOT IN ('completed','expired')", id); err != nil {
-						log.Printf("purchase intent %d: attempt audit unavailable", id)
-						continue
-					}
-					if err := syncAutomaticPurchase(d, id); err != nil {
+					if err := retryAutomaticPurchase(d, id, 0); err != nil {
 						log.Printf("purchase intent %d: %v", id, err)
-						code := "activation_sync_unavailable"
-						if errors.Is(err, errPurchasePlacementRequired) {
-							code = "placement_required"
-						}
-						if _, recordErr := d.DB.Exec("UPDATE package_purchase_intents SET last_sync_error=? WHERE id=? AND status NOT IN ('completed','expired')", code, id); recordErr != nil {
-							log.Printf("purchase intent %d: sync diagnostic unavailable", id)
-						}
-					} else {
-						if _, recordErr := d.DB.Exec("UPDATE package_purchase_intents SET last_sync_error=NULL WHERE id=?", id); recordErr != nil {
-							log.Printf("purchase intent %d: sync diagnostic unavailable", id)
-						}
 					}
 				}
 			}
@@ -52,10 +35,35 @@ func StartAutomaticPurchases(d *app.Deps) {
 	}()
 }
 
+// Both the worker and the authenticated retry use the same audited,
+// idempotent settlement flow. expectedUserID is zero only for the worker.
+func retryAutomaticPurchase(d *app.Deps, id, expectedUserID uint64) error {
+	if _, err := d.DB.Exec("UPDATE package_purchase_intents SET last_checked_at=NOW(),last_attempt_at=NOW() WHERE id=? AND status NOT IN ('completed','expired')", id); err != nil {
+		return err
+	}
+	err := syncAutomaticPurchaseForUser(d, id, expectedUserID)
+	var code interface{}
+	if err != nil {
+		code = "activation_sync_unavailable"
+		if errors.Is(err, errPurchasePlacementRequired) {
+			code = "placement_required"
+		}
+	}
+	_, recordErr := d.DB.Exec("UPDATE package_purchase_intents SET last_sync_error=? WHERE id=? AND status NOT IN ('completed','expired')", code, id)
+	return errors.Join(err, recordErr)
+}
+
 func syncAutomaticPurchase(d *app.Deps, id uint64) error {
+	return syncAutomaticPurchaseForUser(d, id, 0)
+}
+
+func syncAutomaticPurchaseForUser(d *app.Deps, id, expectedUserID uint64) error {
 	var userID uint64
 	if err := d.DB.Get(&userID, "SELECT user_id FROM package_purchase_intents WHERE id=?", id); err != nil {
 		return err
+	}
+	if expectedUserID != 0 && userID != expectedUserID {
+		return blockchain.ErrUnavailable
 	}
 	tx, err := d.DB.Beginx()
 	if err != nil {

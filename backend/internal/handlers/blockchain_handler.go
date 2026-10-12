@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
 	"github.com/go-chi/chi/v5"
+	"io"
+	"math/big"
 	"net/http"
 	"signet-backend/internal/app"
 	"signet-backend/internal/auth"
@@ -77,6 +80,7 @@ func RegisterBlockchainRoutes(r chi.Router, d *app.Deps) {
 		}
 		httpx.JSON(w, 200, response)
 	})).ServeHTTP)
+	r.With(d.Auth.RequireAuth, httpx.SecurityRateLimit(2, time.Minute)).Post("/api/v1/blockchain/purchase/sync", purchaseSyncHandler(d))
 	r.Get("/api/v1/blockchain/purchase", d.Auth.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if d.Blockchain == nil {
 			httpx.Error(w, 503, "Blockchain integration is disabled")
@@ -134,4 +138,84 @@ func RegisterBlockchainRoutes(r chi.Router, d *app.Deps) {
 		}
 		httpx.OK(w, map[string]interface{}{"status": "success", "wallet": wallet})
 	})).ServeHTTP)
+}
+
+func purchaseSyncHandler(d *app.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !d.Cfg.BlockchainEnabled || d.Blockchain == nil {
+			httpx.Error(w, 503, "Blockchain integration is disabled")
+			return
+		}
+		user := auth.UserFromContext(r.Context())
+		var body struct {
+			PurchaseID string `json:"purchase_id"`
+		}
+		if err := decodeJSON(r, &body); err != nil && !errors.Is(err, io.EOF) {
+			httpx.Error(w, 422, "Select a valid purchase")
+			return
+		}
+		var id uint64
+		query := "SELECT id FROM package_purchase_intents WHERE user_id=? ORDER BY id DESC LIMIT 1"
+		args := []interface{}{user.ID}
+		if body.PurchaseID != "" {
+			purchaseID, ok := parseUintParam(body.PurchaseID)
+			if !ok || purchaseID == 0 {
+				httpx.Error(w, 422, "Select a valid purchase")
+				return
+			}
+			query = "SELECT id FROM package_purchase_intents WHERE user_id=? AND id=?"
+			args = append(args, purchaseID)
+		}
+		if err := d.DB.Get(&id, query, args...); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				httpx.Error(w, 404, "Purchase not found. Refresh your package status.")
+			} else {
+				httpx.Error(w, 503, "Purchase status temporarily unavailable")
+			}
+			return
+		}
+		if err := retryAutomaticPurchase(d, id, user.ID); err != nil {
+			message := "Activation check could not complete. Your account and recorded deposit remain available; please retry or contact support."
+			if errors.Is(err, errPurchasePlacementRequired) {
+				message = "Your placement needs review before activation can proceed. Your recorded deposit remains available."
+			}
+			httpx.Error(w, 503, message)
+			return
+		}
+		var purchase struct {
+			ID        uint64 `db:"id" json:"id"`
+			Status    string `db:"status" json:"status"`
+			Kind      string `db:"purchase_kind" json:"purchase_kind"`
+			Available string `db:"available_usdt" json:"available_usdt"`
+			Remaining string `db:"remaining_usdt" json:"remaining_usdt"`
+		}
+		if err := d.DB.Get(&purchase, "SELECT id,status,purchase_kind,available_usdt,remaining_usdt FROM package_purchase_intents WHERE id=? AND user_id=?", id, user.ID); err != nil {
+			httpx.Error(w, 503, "The activation request was received, but status could not be refreshed. Refresh before trying again.")
+			return
+		}
+		if purchase.Kind == "topup" && purchase.Status != "completed" && !d.Cfg.BlockchainTopupEnabled {
+			httpx.Error(w, 503, "Top-up processing is temporarily disabled. Your recorded funds are preserved.")
+			return
+		}
+		message := "Activation is processing. You can leave this page and return later; do not deposit again for this purchase."
+		switch purchase.Status {
+		case "completed":
+			message = "Your package is active."
+			if purchase.Kind == "topup" {
+				message = "Your top-up is complete and your income cap has increased."
+			}
+		case "awaiting_deposit":
+			message = "Balance checked. More confirmed USDT is needed to cover the package and service fee."
+			if remaining, ok := new(big.Rat).SetString(purchase.Remaining); ok && remaining.Sign() == 0 {
+				message = "Your confirmed balance covers the package and service fee. Activation is being processed; no further deposit is needed."
+			}
+		case "expired":
+			httpx.Error(w, 409, "This purchase has expired. Contact support if you already deposited funds.")
+			return
+		case "awaiting_reopening":
+			httpx.Error(w, 409, "Your placement is awaiting confirmation. Funds remain preserved.")
+			return
+		}
+		httpx.OK(w, map[string]interface{}{"status": "success", "message": message, "purchase": purchase})
+	}
 }

@@ -11,12 +11,6 @@ const links = [
 </script>
 
 <template>
-  <header class="wallet-command-header">
-    <p class="wallet-eyebrow">SIGNET / DIGITAL ASSETS</p>
-    <h2>Your asset command centre</h2>
-    <p>Manage deposits, follow your releases and prepare secure withdrawals.</p>
-    <span class="wallet-network-note">BSC network · Confirmed ledger balances</span>
-  </header>
   <nav class="wallet-navigation" aria-label="Asset workspace">
     <RouterLink v-for="link in links" :key="link.to" :to="link.to"
       :class="{ selected: route.path === link.to || route.path.startsWith(link.to + '/') }"

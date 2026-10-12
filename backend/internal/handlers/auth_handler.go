@@ -81,6 +81,18 @@ func loginHandler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 
+		// Pending blockchain registrations can resume funding after signing in.
+		// The deadline controls unpaid cleanup, not access to deposited funds.
+		if d.Cfg.BlockchainEnabled && user.Role == "user" && user.Status == "pending" {
+			path, err := registrationLoginPath(d, user.ID)
+			if err != nil {
+				httpx.Error(w, 503, "Registration status temporarily unavailable")
+				return
+			}
+			httpx.OK(w, map[string]interface{}{"status": "success", "redirect": path, "role": user.Role})
+			return
+		}
+
 		var packageCount int
 		_ = d.DB.Get(&packageCount, "SELECT COUNT(*) FROM user_packages WHERE user_id = ?", user.ID)
 
@@ -92,7 +104,7 @@ func loginHandler(d *app.Deps) http.HandlerFunc {
 			var pendingID models.NullInt64
 			_ = d.DB.Get(&pendingID, "SELECT id FROM user_packages WHERE user_id = ? AND status = 'pending' LIMIT 1", user.ID)
 			if pendingID.Valid {
-				httpx.OK(w, map[string]interface{}{"status": "error", "message": "You're package is pending"})
+				httpx.OK(w, map[string]interface{}{"status": "error", "message": "Your package is pending"})
 				return
 			}
 			httpx.OK(w, map[string]interface{}{"status": "success", "role": user.Role, "dashboard": user.Role + ".dashboard"})
@@ -102,6 +114,17 @@ func loginHandler(d *app.Deps) http.HandlerFunc {
 		// has no package at all; matches the original exactly (not a logout).
 		httpx.OK(w, map[string]interface{}{"status": "error", "message": "You do not have any package"})
 	}
+}
+
+func registrationLoginPath(d *app.Deps, userID uint64) (string, error) {
+	var count int
+	if err := d.DB.Get(&count, "SELECT COUNT(*) FROM package_purchase_intents WHERE user_id=?", userID); err != nil {
+		return "", err
+	}
+	if count > 0 {
+		return "/register/funding/" + strconv.FormatUint(userID, 10), nil
+	}
+	return "/register/step2/" + strconv.FormatUint(userID, 10), nil
 }
 
 func logoutHandler(d *app.Deps) http.HandlerFunc {
@@ -118,8 +141,18 @@ func meHandler(d *app.Deps) http.HandlerFunc {
 			httpx.JSON(w, http.StatusOK, map[string]interface{}{"authenticated": false})
 			return
 		}
+		loginPath := ""
+		if d.Cfg.BlockchainEnabled && user.Role == "user" && user.Status == "pending" {
+			var err error
+			loginPath, err = registrationLoginPath(d, user.ID)
+			if err != nil {
+				httpx.Error(w, 503, "Registration status temporarily unavailable")
+				return
+			}
+		}
 		httpx.OK(w, map[string]interface{}{
-			"authenticated": true,
+			"registration_path": loginPath,
+			"authenticated":     true,
 			"user": map[string]interface{}{
 				"id":          user.ID,
 				"signet_id":   models.SignetID(user.ID),
@@ -357,8 +390,11 @@ func registerStep2FormHandler(d *app.Deps) http.HandlerFunc {
 			}
 		}
 		var packages []models.Package
-		_ = d.DB.Select(&packages, "SELECT * FROM packages WHERE status = 'active'")
-		httpx.OK(w, map[string]interface{}{"status": "success", "id": id, "packages": packages, "blockchain_enabled": d.Cfg.BlockchainEnabled})
+		if err := d.DB.Select(&packages, "SELECT * FROM packages WHERE status = 'active'"); err != nil {
+			httpx.Error(w, 503, "Package catalog temporarily unavailable")
+			return
+		}
+		httpx.OK(w, map[string]interface{}{"status": "success", "id": id, "packages": purchasePackageChoices(packages, d.Cfg.BlockchainEnabled), "blockchain_enabled": d.Cfg.BlockchainEnabled})
 	}
 }
 
@@ -513,7 +549,7 @@ func registerStep2SubmitHandler(d *app.Deps) http.HandlerFunc {
 		}
 
 		var buyPackage models.Package
-		if err := tx.Get(&buyPackage, "SELECT * FROM packages WHERE id = ?", packageID); err != nil {
+		if err := tx.Get(&buyPackage, "SELECT * FROM packages WHERE id = ? AND status = 'active'", packageID); err != nil {
 			httpx.Error(w, http.StatusNotFound, "Package not found")
 			return
 		}

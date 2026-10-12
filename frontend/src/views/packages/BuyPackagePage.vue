@@ -28,7 +28,6 @@ const selectedPackage = ref('')
 const blockchainEnabled = ref(false)
 const topupEnabled = ref(false)
 const showLowerPackages = ref(false)
-const fees = {1:0.10,100:20,500:80,1000:130,2500:280,5000:1030,10000:2030,25000:5030,50000:15030,100000:30030,500000:150030,1000000:400030}
 const visiblePackages = computed(() => visiblePackageChoices(packages.value, blockchainEnabled.value, showLowerPackages.value))
 const selected = computed(() => packages.value.find(p => String(p.id) === String(selectedPackage.value)))
 const submitting = ref(false)
@@ -76,7 +75,7 @@ onMounted(fetchPackages)
 <template>
   <!-- buy-package.blade.php renders its card inside the app shell (sidebar + topbar). -->
   <DashboardLayout>
-    <AuthCardLayout :show-back-link="false">
+    <AuthCardLayout embedded :show-back-link="false">
       <FlashAlert type="danger" :message="loadError" @close="loadError = ''" />
       <form method="POST" @submit.prevent="submit">
         <div class="form-group">
@@ -89,7 +88,7 @@ onMounted(fetchPackages)
         <template v-if="blockchainEnabled">
           <label class="mt-2"><input v-model="showLowerPackages" type="checkbox" :disabled="loading || submitting" /> Show lower / test packages</label>
           <p class="mt-3">Top-ups extend your income cap only. You receive no new SIGNET allocation, bonus or vesting.</p>
-          <p v-if="selected && fees[selected.price] != null">Package: {{ selected.price }} USDT. Service fee: {{ fees[selected.price] }} USDT. Required deposit: {{ Number(selected.price) + fees[selected.price] }} USDT.</p>
+          <p v-if="selected && selected.commercial_terms">Package: {{ selected.price }} USDT. Service fee: {{ selected.commercial_terms.service_fee_usdt }} USDT. Required deposit: {{ selected.commercial_terms.required_usdt }} USDT.</p>
           <p v-if="!topupEnabled">Automatic top-ups are not enabled yet.</p>
         </template>
         <button type="submit" class="btn btn-primary mt-4" :disabled="submitting || loading || (blockchainEnabled && !topupEnabled)">Next</button>

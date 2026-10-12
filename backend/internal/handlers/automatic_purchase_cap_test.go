@@ -13,7 +13,47 @@ import (
 )
 
 func TestAutomaticPurchaseDeniedCapActivatesAndCreditsCompanyOnce(t *testing.T) {
-	fixture := &commissionSQLFixture{steps: []commissionSQLStep{
+	fixture := activationCapFixture()
+	db := sqlx.NewDb(sql.OpenDB(fixture), "commission-fixture")
+	defer db.Close()
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("Idempotency-Key") != "signet-app:purchase:1" {
+			t.Error("changed durable purchase identity")
+		}
+		w.Write([]byte(`{"status":"completed","available_usdt":"20","deposit_seen":true,"order_id":"remote-1","swap_confirmed":true,"vesting_allocated":true}`))
+	}))
+	defer server.Close()
+	gateway, err := blockchain.New(server.URL, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syncAutomaticPurchase(&app.Deps{DB: db, Blockchain: gateway}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || !fixture.committed || fixture.rolledBack || len(fixture.steps) != 0 {
+		t.Fatal("company diversion and activation were not committed together")
+	}
+	// A manual click racing just after the automatic commit, and another
+	// worker tick, must both observe completion without any remote replay.
+	for _, expectedUserID := range []uint64{42, 0} {
+		fixture.steps = []commissionSQLStep{
+			{contains: "SELECT user_id FROM package_purchase_intents", columns: []string{"user_id"}, values: []driver.Value{int64(42)}},
+			{contains: "SELECT status FROM users", columns: []string{"status"}, values: []driver.Value{"active"}},
+			{contains: "SELECT id,user_id,user_package_id", err: sql.ErrNoRows},
+		}
+		if err := syncAutomaticPurchaseForUser(&app.Deps{DB: db, Blockchain: gateway}, 1, expectedUserID); err != nil {
+			t.Fatal(err)
+		}
+		if calls != 1 || len(fixture.steps) != 0 {
+			t.Fatal("completed activation was duplicated")
+		}
+	}
+}
+
+func activationCapFixture() *commissionSQLFixture {
+	return &commissionSQLFixture{steps: []commissionSQLStep{
 		{contains: "SELECT user_id FROM package_purchase_intents", columns: []string{"user_id"}, values: []driver.Value{int64(42)}},
 		{contains: "SELECT status FROM users", columns: []string{"status"}, values: []driver.Value{"inactive"}},
 		{contains: "SELECT id,user_id,user_package_id", columns: []string{"id", "user_id", "user_package_id", "package_price", "commission_user_id", "commission_percent", "package_id", "status"}, values: []driver.Value{int64(1), int64(42), int64(9), "100", int64(77), int64(50), int64(1), "awaiting_deposit"}},
@@ -40,25 +80,4 @@ func TestAutomaticPurchaseDeniedCapActivatesAndCreditsCompanyOnce(t *testing.T) 
 		{contains: "INSERT INTO income_cap_diversions", args: []driver.Value{int64(77), int64(1), "50"}},
 		{contains: "UPDATE package_purchase_intents SET status", args: []driver.Value{"completed", "20", "0.000000000000000000", true, "remote-1", int64(1)}},
 	}}
-	db := sqlx.NewDb(sql.OpenDB(fixture), "commission-fixture")
-	defer db.Close()
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if r.Header.Get("Idempotency-Key") != "signet-app:purchase:1" {
-			t.Error("changed durable purchase identity")
-		}
-		w.Write([]byte(`{"status":"completed","available_usdt":"20","deposit_seen":true,"order_id":"remote-1","swap_confirmed":true,"vesting_allocated":true}`))
-	}))
-	defer server.Close()
-	gateway, err := blockchain.New(server.URL, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := syncAutomaticPurchase(&app.Deps{DB: db, Blockchain: gateway}, 1); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 1 || !fixture.committed || fixture.rolledBack || len(fixture.steps) != 0 {
-		t.Fatal("company diversion and activation were not committed together")
-	}
 }

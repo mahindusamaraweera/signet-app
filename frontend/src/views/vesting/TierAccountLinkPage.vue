@@ -48,6 +48,7 @@ onMounted(async () => {
 
 <template>
   <DashboardLayout>
+    <section class="card wallet-panel tier-link-panel"><p class="wallet-eyebrow">ACCOUNT CONNECTION</p>
     <h1 class="h3">Connect my Tier account</h1>
     <p>Sign in to your existing Tier account and confirm ownership. This link verifies qualifying investments; it does not merge accounts, wallets or referral teams.</p>
     <p v-if="error" class="alert alert-warning" role="alert">{{ error }}</p>
@@ -57,5 +58,6 @@ onMounted(async () => {
       <button v-else class="btn btn-primary" :disabled="busy" @click="begin">{{ busy ? 'Checking…' : 'Connect my Tier account' }}</button>
     </template>
     <RouterLink to="/wallet/vesting" class="btn btn-link">Back to vesting</RouterLink>
+    </section>
   </DashboardLayout>
 </template>

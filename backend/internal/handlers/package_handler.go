@@ -5,7 +5,9 @@
 package handlers
 
 import (
+	"math"
 	"net/http"
+	"signet-backend/internal/blockchain"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -55,17 +57,11 @@ func validatePackagePayload(body *packagePayload) map[string][]string {
 	if body.Name == nil || strings.TrimSpace(*body.Name) == "" {
 		errs["name"] = []string{"The name field is required."}
 	}
-	if body.Price == nil {
-		errs["price"] = []string{"The price field is required."}
+	if body.Price == nil || *body.Price <= 0 || math.IsNaN(*body.Price) || math.IsInf(*body.Price, 0) || math.Trunc(*body.Price) != *body.Price || *body.Price > 2147483647 {
+		errs["price"] = []string{"The price must be a positive whole number within the supported range."}
 	}
-	if body.Commission == nil {
-		errs["commission"] = []string{"The commission field is required."}
-	}
-	if body.Rank == nil || strings.TrimSpace(*body.Rank) == "" {
-		errs["rank"] = []string{"The rank field is required."}
-	}
-	if body.TelegramLink == nil || strings.TrimSpace(*body.TelegramLink) == "" {
-		errs["telegram_link"] = []string{"The telegram link field is required."}
+	if body.Commission == nil || *body.Commission < 0 || *body.Commission > 100 || math.IsNaN(*body.Commission) || math.Trunc(*body.Commission) != *body.Commission {
+		errs["commission"] = []string{"The commission must be a whole percentage between 0 and 100."}
 	}
 	if body.Status == nil || strings.TrimSpace(*body.Status) == "" {
 		errs["status"] = []string{"The status field is required."}
@@ -94,13 +90,14 @@ func packageStoreHandler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 		errs := validatePackagePayload(&body)
+		validateCommercialPackagePayload(d, &body, errs)
 		if len(errs) > 0 {
 			httpx.ValidationError(w, errs)
 			return
 		}
 		res, err := d.DB.Exec(`INSERT INTO packages (name, price, commission, rank, telegram_link, status, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-			*body.Name, int64(*body.Price), int64(*body.Commission), *body.Rank, *body.TelegramLink, *body.Status)
+			*body.Name, int64(*body.Price), int64(*body.Commission), optionalPackageText(body.Rank), optionalPackageText(body.TelegramLink), *body.Status)
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "Database error")
 			return
@@ -144,12 +141,13 @@ func packageUpdateHandler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 		errs := validatePackagePayload(&body)
+		validateCommercialPackagePayload(d, &body, errs)
 		if len(errs) > 0 {
 			httpx.ValidationError(w, errs)
 			return
 		}
 		if _, err := d.DB.Exec(`UPDATE packages SET name=?, price=?, commission=?, rank=?, telegram_link=?, status=?, updated_at=NOW() WHERE id=?`,
-			*body.Name, int64(*body.Price), int64(*body.Commission), *body.Rank, *body.TelegramLink, *body.Status, id); err != nil {
+			*body.Name, int64(*body.Price), int64(*body.Commission), optionalPackageText(body.Rank), optionalPackageText(body.TelegramLink), *body.Status, id); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "Database error")
 			return
 		}
@@ -220,8 +218,11 @@ func buyPackageHistoryHandler(d *app.Deps) http.HandlerFunc {
 func buyPackageHandler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var packages []models.Package
-		_ = d.DB.Select(&packages, "SELECT * FROM packages WHERE status = 'active'")
-		httpx.OK(w, map[string]interface{}{"status": "success", "packages": packages, "blockchain_enabled": d.Cfg.BlockchainEnabled, "topup_enabled": d.Cfg.BlockchainTopupEnabled})
+		if err := d.DB.Select(&packages, "SELECT * FROM packages WHERE status = 'active'"); err != nil {
+			httpx.Error(w, 503, "Package catalog temporarily unavailable")
+			return
+		}
+		httpx.OK(w, map[string]interface{}{"status": "success", "packages": purchasePackageChoices(packages, d.Cfg.BlockchainEnabled), "blockchain_enabled": d.Cfg.BlockchainEnabled, "topup_enabled": d.Cfg.BlockchainTopupEnabled})
 	}
 }
 
@@ -304,7 +305,7 @@ func buyPackagesHandler(d *app.Deps) http.HandlerFunc {
 		}
 
 		var buyPackage models.Package
-		if err := d.DB.Get(&buyPackage, "SELECT * FROM packages WHERE id = ?", packageID); err != nil {
+		if err := d.DB.Get(&buyPackage, "SELECT * FROM packages WHERE id = ? AND status = 'active'", packageID); err != nil {
 			httpx.OK(w, map[string]interface{}{"status": "error", "message": "Package not found"})
 			return
 		}
@@ -322,5 +323,42 @@ func buyPackagesHandler(d *app.Deps) http.HandlerFunc {
 		}
 
 		httpx.OK(w, map[string]interface{}{"status": "success", "parent_data": parentData})
+	}
+}
+
+// Commercial terms come from the backend so selection screens cannot drift.
+type purchasePackageChoice struct {
+	models.Package
+	Terms *blockchain.PackageTerms `json:"commercial_terms,omitempty"`
+}
+
+func purchasePackageChoices(packages []models.Package, blockchainEnabled bool) []purchasePackageChoice {
+	choices := make([]purchasePackageChoice, 0, len(packages))
+	for _, pkg := range packages {
+		choice := purchasePackageChoice{Package: pkg}
+		if blockchainEnabled {
+			terms, err := blockchain.CommercialPackageTerms(pkg.Price)
+			if err != nil {
+				continue
+			}
+			choice.Terms = &terms
+		}
+		choices = append(choices, choice)
+	}
+	return choices
+}
+
+func optionalPackageText(value *string) interface{} {
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return nil
+	}
+	return strings.TrimSpace(*value)
+}
+
+func validateCommercialPackagePayload(d *app.Deps, body *packagePayload, errs map[string][]string) {
+	if d.Cfg.BlockchainEnabled && body.Status != nil && *body.Status == "active" && body.Price != nil && len(errs["price"]) == 0 {
+		if _, err := blockchain.CommercialPackageTerms(int64(*body.Price)); err != nil {
+			errs["price"] = []string{"This price has no approved blockchain commercial terms."}
+		}
 	}
 }

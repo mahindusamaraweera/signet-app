@@ -117,13 +117,13 @@ onBeforeUnmount(() => {
 
 <template>
   <DashboardLayout>
-  <main class="container py-3" style="max-width: 760px">
+  <div class="wallet-form-page">
     <h1 class="h4">Withdrawal security</h1>
     <p class="alert alert-info">Complete email verification, authenticator setup and withdrawal-address verification before requesting a payout. Address waiting periods and security holds still apply. Processing depends on the platform’s enabled services. Device verification and KYC are not required for this flow.</p>
     <p v-if="error" class="alert alert-warning" role="alert">{{ error }}</p>
     <p v-if="message" class="alert alert-success" role="status">{{ message }}</p>
     <section v-if="status" class="card p-3 mb-3">
-      <p>Email: {{ status.email_verified ? 'verified' : 'verification required' }} · Authenticator: {{ status.authenticator_confirmed ? 'confirmed' : 'setup required' }}</p>
+      <h2 class="h5">Your security checklist</h2><div class="security-checklist"><div><span>Email verification</span><strong :class="status.email_verified ? 'text-success' : 'text-warning'">{{ status.email_verified ? 'Verified' : 'Required' }}</strong></div><div><span>Authenticator</span><strong :class="status.authenticator_confirmed ? 'text-success' : 'text-warning'">{{ status.authenticator_confirmed ? 'Confirmed' : 'Setup required' }}</strong></div></div>
       <p v-if="status.withdrawals_frozen" class="text-danger">Withdrawals are frozen. Contact support.</p>
       <p v-if="status.hold_until">Security hold until {{ status.hold_until }}. Verified-address requirements still apply after the hold.</p>
       <button class="btn btn-outline-secondary" :disabled="busy" @click="action('refresh')">Refresh status</button>
@@ -190,6 +190,6 @@ onBeforeUnmount(() => {
         <button class="btn btn-outline-secondary ms-2" :disabled="busy" @click="revokeTarget = null; revokeChallenge = revokeEmailCode = revokeAuthCode = ''; password = ''">Cancel</button>
       </div>
     </section>
-  </main>
+  </div>
   </DashboardLayout>
 </template>

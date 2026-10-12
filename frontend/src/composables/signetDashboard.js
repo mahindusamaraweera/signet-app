@@ -695,48 +695,8 @@ export function initSignetDashboard() {
     });
   }
 
-  /* count-up for stat numbers */
-  function countUp(el) {
-    var node = null;
-    for (var i = 0; i < el.childNodes.length; i++) {
-      if (el.childNodes[i].nodeType === 3 && el.childNodes[i].nodeValue.trim() !== '') { node = el.childNodes[i]; break; }
-    }
-    if (!node) return;
-    var raw = node.nodeValue.trim();
-    if (!/^-?[\d,]*\.?\d+$/.test(raw)) return;
-    var target = parseFloat(raw.replace(/,/g, ''));
-    if (!isFinite(target) || target === 0) return;
-
-    var dec = (raw.split('.')[1] || '').length;
-    var comma = raw.indexOf(',') > -1;
-    var lead = node.nodeValue.match(/^\s*/)[0];
-    var trail = node.nodeValue.match(/\s*$/)[0];
-    var fmt = function (v) {
-      var s = v.toFixed(dec);
-      if (comma) {
-        var p = s.split('.');
-        p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        s = p.join('.');
-      }
-      return s;
-    };
-
-    var start = null, dur = 1300;
-    node.nodeValue = lead + fmt(0) + trail;
-    var step = function (ts) {
-      if (start === null) start = ts;
-      var t = Math.min(1, (ts - start) / dur);
-      var eased = 1 - Math.pow(1 - t, 3);
-      node.nodeValue = lead + (t < 1 ? fmt(target * eased) : raw) + trail;
-      if (t < 1) track.raf(step);
-    };
-    track.raf(step);
-  }
-
-  track.timeout(function () {
-    var nums = document.querySelectorAll('.card-body h3.fw-extrabold');
-    for (var i = 0; i < nums.length; i++) countUp(nums[i]);
-  }, 350);
+  // Keep financial values as rendered from the API; do not replace them
+  // with intermediate count-up values.
 
   return cleanup;
 }
