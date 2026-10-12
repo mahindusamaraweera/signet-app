@@ -143,10 +143,15 @@ page. From `backend/`:
 ```bash
 go run ./cmd/migrate status
 go run ./cmd/migrate up
-sudo systemctl restart signet-api
-sudo systemctl status signet-api --no-pager
-sudo journalctl -u signet-api --since '10 minutes ago' --no-pager
+SIGNET_API_UNIT=signet-staging.service
+sudo systemctl restart "$SIGNET_API_UNIT"
+sudo systemctl status "$SIGNET_API_UNIT" --no-pager
+sudo journalctl -u "$SIGNET_API_UNIT" --since '10 minutes ago' --no-pager
 ```
+
+`signet-staging.service` is the unit identified in the supplied staging logs.
+For production or another host, set `SIGNET_API_UNIT` to that deployment's actual
+unit before running these commands.
 
 After a confirmed deposit, use **Refresh wallet** to check the available USDT,
 selected package and service fee. **Activate package** is an optional fallback:
