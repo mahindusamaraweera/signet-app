@@ -164,6 +164,26 @@ and custody logs. A placement review or replacement confirmation must be
 resolved through its supported flow. Do not mark `user_packages` active with a
 manual SQL update: that bypasses custody confirmation, commissions and vesting.
 
+### Tier-gated SIGNET allocation
+
+Deploy the matching Signet-token Tier-gated allocation change with this frontend.
+Package activation confirms custody funding, swap and purchaser bonus, but does
+not start vesting. Purchased SIGNET plus bonus stays locked until a qualifying
+Tier Option 1/2 is reviewed and confirmed. Existing external-package schedules
+without either option stop future accrual; already released funds remain intact.
+
+Custody counts settled commission/reward SIGNET credits cumulatively, including
+amounts already withdrawn. When those earnings reach the original allocation,
+it returns only the remaining locked allocation to the purchase's treasury.
+Deposits, purchaser bonuses, transfers, vesting releases and the separate Tier
+account's earnings do not count. Tier eligibility uses invested principal only.
+
+Ensure the existing Laravel scheduler and `blockchain` worker run the new
+`signet-app:allocation-recovery` minute task. Returns remain pending until a
+matching on-chain receipt is confirmed. This change needs no new migration;
+refresh custody config cache and restart the correct Horizon/queue service.
+Deploy the frontend to show waiting, recovery-pending and recovered states.
+
 ## 4. Frontend
 
 ### Build

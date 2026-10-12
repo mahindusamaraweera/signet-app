@@ -200,7 +200,7 @@ func purchaseSyncHandler(d *app.Deps) http.HandlerFunc {
 		message := "Activation is processing. You can leave this page and return later; do not deposit again for this purchase."
 		switch purchase.Status {
 		case "completed":
-			message = "Your package is active."
+			message = "Your package is active. Your purchased SIGNET and bonus remain locked until qualifying Tier vesting starts."
 			if purchase.Kind == "topup" {
 				message = "Your top-up is complete and your income cap has increased."
 			}
