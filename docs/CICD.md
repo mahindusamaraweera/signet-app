@@ -149,6 +149,17 @@ deploy: done — <commit> is live
   look at the latest Deploy run.
 - **Logs of a deploy:** the Actions run. Everything the server script
   prints shows up there.
+- **Logs of the running app, without SSH:** logged in as a **company**
+  account, open `https://<domain>/api/v1/admin/logs?since=24h&grep=purchase%20intent`.
+  The parameters are `since` (`30m`, `6h`, `24h`; max `168h`), `grep`
+  (plain text, case-insensitive) and `limit` (default 500, max 5000;
+  newest lines are kept). It reads the systemd journal of that environment's
+  own service, `signet-api` or `signet-api-staging`, so it's the same data
+  as `journalctl -u …`. The deploy adds the service user to the read-only
+  `systemd-journal` group for this. If the journal can't be read,
+  `"source": "memory"` and a `warning` say so, and you get only the lines
+  logged since the last restart. Each view is itself logged
+  (`admin-logs: user N viewed …`).
 
 ## Changing the domain
 

@@ -3,8 +3,10 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,6 +19,7 @@ import (
 	"signet-backend/internal/db"
 	"signet-backend/internal/handlers"
 	"signet-backend/internal/jobs"
+	"signet-backend/internal/logbuf"
 	"signet-backend/internal/registrationverification"
 	"signet-backend/internal/securitymail"
 	"signet-backend/internal/storage"
@@ -25,6 +28,10 @@ import (
 )
 
 func main() {
+	// Keep recent log lines in memory too, for GET /api/v1/admin/logs when the
+	// systemd journal isn't readable (see handlers/logs_handler.go).
+	log.SetOutput(io.MultiWriter(os.Stderr, logbuf.Default))
+
 	cfg := config.Load()
 	wallet.ConfigurePendingCommissionGuard(cfg.BlockchainEnabled && cfg.BlockchainTopupEnabled)
 
@@ -95,6 +102,7 @@ func main() {
 	handlers.RegisterUserParentMapsLogRoutes(r, deps)
 	handlers.RegisterEarnLogRoutes(r, deps)
 	handlers.RegisterAPIV1Routes(r, deps)
+	handlers.RegisterLogRoutes(r, deps)
 
 	if cfg.EnableScheduler {
 		if cfg.BlockchainEnabled {
