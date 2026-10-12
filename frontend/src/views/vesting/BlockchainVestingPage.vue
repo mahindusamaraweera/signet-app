@@ -143,6 +143,16 @@ onUnmounted(() => { clearInterval(tickTimer); clearInterval(refreshTimer) })
         <button v-if="s.existing_user_switch_available && !switchPreviews[s.id] && !switchRequests[s.id]" class="btn btn-outline-primary" :disabled="busy" @click="previewSwitch(s)">Review 10,000-day switch</button>
         <button v-if="s.tier_switch_review_available && !switchPreviews[s.id] && !switchRequests[s.id]" class="btn btn-outline-primary" :disabled="busy" @click="previewSwitch(s, 'tier')">Check linked Tier eligibility</button>
         <div v-if="switchPreviews[s.id]">
+          <dl v-if="switchPreviews[s.id].eligibility" class="vesting-dates">
+            <div><dt>Package price (excluding fee)</dt><dd><AssetAmount :value="switchPreviews[s.id].eligibility.package_usd" asset="USDT" /></dd></div>
+            <div><dt>Qualifying Tier investment</dt><dd><AssetAmount :value="switchPreviews[s.id].eligibility.qualifying_usd" asset="USDT" /></dd></div>
+            <div><dt>Investment with 3,000-day duration</dt><dd><AssetAmount :value="switchPreviews[s.id].eligibility.qualifying_3000_day_usd" asset="USDT" /></dd></div>
+          </dl>
+          <p v-if="switchPreviews[s.id].eligibility" class="small text-muted">Verified Tier purchase IDs: {{ switchPreviews[s.id].eligibility.purchase_ids?.join(', ') || 'None' }}. Amounts exclude bonuses, earnings and refunded purchases.</p>
+          <details v-if="switchPreviews[s.id].eligibility" class="mb-3">
+            <summary>Exact investment totals</summary>
+            <p class="text-break small">Package price: {{ switchPreviews[s.id].eligibility.package_usd }} USDT<br />Qualifying Tier investment: {{ switchPreviews[s.id].eligibility.qualifying_usd }} USDT<br />Investment with 3,000-day duration: {{ switchPreviews[s.id].eligibility.qualifying_3000_day_usd }} USDT</p>
+          </details>
           <p v-if="switchPreviews[s.id].option === 'option_2'">Option 2: release starts after the 2,000-day wait measured from your package purchase date.</p>
           <p v-if="switchPreviews[s.id].option === 'option_1'">Option 1: your combined qualifying 3,000-day Tier investments match this package.</p>
           <p>Remaining: {{ switchPreviews[s.id].remaining_amount }} SIGNET · Daily: {{ switchPreviews[s.id].daily_release_amount }} SIGNET</p>
