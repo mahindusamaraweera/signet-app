@@ -11,6 +11,13 @@ test('partial deposits show the exact server deficit and preserve account messag
 test('one base unit short still triggers a reminder', () => {
   assert.ok(partialDepositReminder({ status: 'awaiting_deposit', deposit_seen: true, remaining_usdt: '0.000000000000000001' }))
 })
+test('activation sync errors suppress reminders based on a stale deficit', () => {
+  const purchase = { status: 'awaiting_deposit', deposit_seen: true, remaining_usdt: '1.10' }
+  for (const last_sync_error of ['activation_sync_unavailable', 'placement_required']) {
+    assert.equal(partialDepositReminder({ ...purchase, last_sync_error }), null)
+  }
+  assert.ok(partialDepositReminder({ ...purchase, last_sync_error: null }))
+})
 test('zero, excess, unpaid, processing and malformed deficits never trigger', () => {
   for (const remaining of ['0', '0.000000000000000000', '-1', 'NaN', '', '1e3']) {
     assert.equal(partialDepositReminder({ status: 'awaiting_deposit', deposit_seen: true, remaining_usdt: remaining }), null)

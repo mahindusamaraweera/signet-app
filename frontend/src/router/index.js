@@ -20,6 +20,7 @@ const routes = [
   { path: '/password/reset/verify', name: 'password.reset.verify', component: () => import('@/views/auth/ResetPasswordPage.vue'), meta: { public: true } },
   { path: '/password/reset/:token', name: 'password.reset', component: () => import('@/views/auth/ResetPasswordPage.vue'), meta: { public: true }, props: true },
   { path: '/register', name: 'register.step1', component: () => import('@/views/auth/RegisterStep1Page.vue'), meta: { public: true } },
+  { path: '/register/check-email', name: 'register.check-email', component: () => import('@/views/auth/RegisterCheckEmailPage.vue'), meta: { public: true } },
   { path: '/register/verify', name: 'register.verify', component: () => import('@/views/auth/RegisterVerifyEmailPage.vue'), meta: { public: true } },
   { path: '/register/step2/:id', name: 'register.step2', component: () => import('@/views/auth/RegisterStep2Page.vue'), meta: { public: true }, props: true },
   { path: '/register/step3/:id', name: 'register.step3.wait', component: () => import('@/views/auth/RegisterStep3WaitPage.vue'), meta: { public: true }, props: true },
