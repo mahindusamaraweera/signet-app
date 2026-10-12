@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"math/big"
 	"signet-backend/internal/app"
@@ -63,7 +64,7 @@ func syncAutomaticPurchaseForUser(d *app.Deps, id, expectedUserID uint64) error 
 		return err
 	}
 	if expectedUserID != 0 && userID != expectedUserID {
-		return blockchain.ErrUnavailable
+		return fmt.Errorf("%w: intent %d belongs to user %d, not %d", blockchain.ErrUnavailable, id, userID, expectedUserID)
 	}
 	tx, err := d.DB.Beginx()
 	if err != nil {
@@ -83,7 +84,7 @@ func syncAutomaticPurchaseForUser(d *app.Deps, id, expectedUserID uint64) error 
 	// The initial lookup was not locked. Do not authorize a remote debit for an
 	// intent whose owner changed, or whose linked package belongs to another user.
 	if intent.UserID != userID {
-		return blockchain.ErrUnavailable
+		return fmt.Errorf("%w: intent %d owner changed (%d -> %d)", blockchain.ErrUnavailable, id, userID, intent.UserID)
 	}
 	if intent.Status == "awaiting_reopening" {
 		// Only the durable replacement coordinator can unlock funding.
@@ -94,7 +95,7 @@ func syncAutomaticPurchaseForUser(d *app.Deps, id, expectedUserID uint64) error 
 		return err
 	}
 	if packageOwner != userID {
-		return blockchain.ErrUnavailable
+		return fmt.Errorf("%w: intent %d: user_package %d belongs to user %d, not %d", blockchain.ErrUnavailable, id, intent.UserPackageID, packageOwner, userID)
 	}
 	if intent.Kind != "topup" && intent.Status == "awaiting_deposit" {
 		var placementID uint64
@@ -125,11 +126,11 @@ func syncAutomaticPurchaseForUser(d *app.Deps, id, expectedUserID uint64) error 
 				return err
 			}
 			if pkg.Status != "pending" {
-				return sql.ErrNoRows
+				return fmt.Errorf("intent %d: service completed the purchase but user_package %d is %q, not pending — needs manual reconciliation: %w", id, intent.UserPackageID, pkg.Status, sql.ErrNoRows)
 			}
 			price, ok := new(big.Rat).SetString(intent.Price)
 			if !ok || !price.IsInt() || !price.Num().IsInt64() {
-				return blockchain.ErrUnavailable
+				return fmt.Errorf("%w: intent %d: package price %q is not a whole number", blockchain.ErrUnavailable, id, intent.Price)
 			}
 			pkg.PackagePrice = price.Num().Int64()
 			// Reuse commission calculations without the legacy sponsor funding/token burn.

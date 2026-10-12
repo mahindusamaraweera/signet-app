@@ -61,7 +61,7 @@ func (g *Gateway) SyncPurchase(ctx context.Context, intent PurchaseIntent) (*Pur
 		kind = "first"
 	}
 	if kind != "first" && kind != "topup" {
-		return nil, ErrUnavailable
+		return nil, fmt.Errorf("%w: unknown purchase kind %q", ErrUnavailable, kind)
 	}
 	custody := "user_purchase_vesting"
 	if kind == "topup" {
@@ -77,13 +77,13 @@ func (g *Gateway) SyncPurchase(ctx context.Context, intent PurchaseIntent) (*Pur
 	}
 	if intent.Required != "" {
 		if !decimalPattern.MatchString(intent.Price) || !decimalPattern.MatchString(intent.Fee) || !decimalPattern.MatchString(intent.Required) || intent.BonusPercent < 0 || (kind == "topup" && intent.BonusPercent != 0) {
-			return nil, ErrUnavailable
+			return nil, fmt.Errorf("%w: intent %d has malformed commercial terms (price %q, fee %q, required %q, bonus %d)", ErrUnavailable, intent.ID, intent.Price, intent.Fee, intent.Required, intent.BonusPercent)
 		}
 		price, _ := new(big.Rat).SetString(intent.Price)
 		fee, _ := new(big.Rat).SetString(intent.Fee)
 		total, _ := new(big.Rat).SetString(intent.Required)
 		if price.Sign() <= 0 || new(big.Rat).Add(price, fee).Cmp(total) != 0 {
-			return nil, ErrUnavailable
+			return nil, fmt.Errorf("%w: intent %d terms don't add up: price %s + fee %s != required %s", ErrUnavailable, intent.ID, intent.Price, intent.Fee, intent.Required)
 		}
 		payload["service_fee_usdt"] = intent.Fee
 		payload["required_usdt"] = intent.Required
@@ -100,28 +100,28 @@ func (g *Gateway) SyncPurchase(ctx context.Context, intent PurchaseIntent) (*Pur
 		fee, feeOK := new(big.Rat).SetString(intent.Fee)
 		remoteFee, remoteOK := new(big.Rat).SetString(result.ServiceFee)
 		if !ok || !actualOK || !feeOK || !remoteOK || expected.Cmp(actual) != 0 || fee.Cmp(remoteFee) != 0 {
-			return nil, ErrUnavailable
+			return nil, fmt.Errorf("%w: intent %d: service terms differ from ours (required %q vs %q, fee %q vs %q)", ErrUnavailable, intent.ID, result.Required, intent.Required, result.ServiceFee, intent.Fee)
 		}
 	}
 	required := intent.Price
 	if result.Required != "" {
 		if !decimalPattern.MatchString(result.Required) || !decimalPattern.MatchString(result.ServiceFee) {
-			return nil, ErrUnavailable
+			return nil, fmt.Errorf("%w: intent %d: service sent malformed amounts (required %q, fee %q)", ErrUnavailable, intent.ID, result.Required, result.ServiceFee)
 		}
 		p, ok := new(big.Rat).SetString(intent.Price)
 		if !ok {
-			return nil, ErrUnavailable
+			return nil, fmt.Errorf("%w: intent %d: invalid package price %q", ErrUnavailable, intent.ID, intent.Price)
 		}
 		fee, _ := new(big.Rat).SetString(result.ServiceFee)
 		total, _ := new(big.Rat).SetString(result.Required)
 		if new(big.Rat).Add(p, fee).Cmp(total) != 0 {
-			return nil, ErrUnavailable
+			return nil, fmt.Errorf("%w: intent %d: service terms don't add up: price %s + fee %s != required %s", ErrUnavailable, intent.ID, intent.Price, result.ServiceFee, result.Required)
 		}
 		required = result.Required
 	}
 	remaining, err := FundingRemaining(required, result.Available)
 	if err != nil || result.DepositSeen == nil {
-		return nil, ErrUnavailable
+		return nil, fmt.Errorf("%w: intent %d: unusable funding data from service (available %q, deposit_seen present: %v, err: %v)", ErrUnavailable, intent.ID, result.Available, result.DepositSeen != nil, err)
 	}
 	available, _ := new(big.Rat).SetString(result.Available)
 	if available.Sign() > 0 {
@@ -134,16 +134,16 @@ func (g *Gateway) SyncPurchase(ctx context.Context, intent PurchaseIntent) (*Pur
 		result.Remaining = "0.000000000000000000"
 	case "awaiting_commission_settlement":
 		if kind != "topup" || result.Kind != kind || !result.SwapConfirmed || result.VestingAllocated {
-			return nil, ErrUnavailable
+			return nil, fmt.Errorf("%w: intent %d: inconsistent awaiting_commission_settlement (kind %q/%q, swap_confirmed %v, vesting_allocated %v)", ErrUnavailable, intent.ID, kind, result.Kind, result.SwapConfirmed, result.VestingAllocated)
 		}
 		result.Remaining = "0.000000000000000000"
 	case "completed":
 		if !result.SwapConfirmed || result.OrderID == "" || (kind == "first" && !result.VestingAllocated) || (kind == "topup" && (result.Kind != kind || !result.SettlementConfirmed || result.VestingAllocated)) {
-			return nil, ErrUnavailable
+			return nil, fmt.Errorf("%w: intent %d: service says completed but is missing confirmations (swap_confirmed %v, order_id %q, vesting_allocated %v, settlement_confirmed %v)", ErrUnavailable, intent.ID, result.SwapConfirmed, result.OrderID, result.VestingAllocated, result.SettlementConfirmed)
 		}
 		result.Remaining = "0.000000000000000000"
 	default:
-		return nil, ErrUnavailable
+		return nil, fmt.Errorf("%w: intent %d: unknown status %q from service", ErrUnavailable, intent.ID, result.Status)
 	}
 	return &result, nil
 }

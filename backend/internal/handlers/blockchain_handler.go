@@ -181,6 +181,8 @@ func purchaseSyncHandler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 		if err := retryAutomaticPurchase(d, id, user.ID); err != nil {
+			// Same format as the background worker, so one grep finds both.
+			log.Printf("purchase intent %d: %v (retry requested by user %d)", id, err, user.ID)
 			message := "Activation check could not complete. Your account and recorded deposit remain available; please retry or contact support."
 			if errors.Is(err, errPurchasePlacementRequired) {
 				message = "Your placement needs review before activation can proceed. Your recorded deposit remains available."

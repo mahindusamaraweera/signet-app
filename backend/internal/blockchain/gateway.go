@@ -135,26 +135,42 @@ func (g *Gateway) request(ctx context.Context, method, path, key string, body in
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Idempotency-Key", key)
+	// Errors keep their sentinel (errors.Is still works) but say why, so the
+	// "purchase intent N: …" worker log explains an activation_sync_unavailable.
 	res, err := g.client.Do(req)
 	if err != nil {
-		return ErrUnavailable
+		return fmt.Errorf("%w: %s %s: %v", ErrUnavailable, method, path, err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusUnprocessableEntity {
-		return ErrRejected
+		return fmt.Errorf("%w: %s %s: HTTP 422: %s", ErrRejected, method, path, errorSnippet(res.Body))
 	}
 	if res.StatusCode == http.StatusConflict {
-		return errors.Join(ErrUnavailable, ErrConflict)
+		return fmt.Errorf("%w: %s %s: HTTP 409: %s", errors.Join(ErrUnavailable, ErrConflict), method, path, errorSnippet(res.Body))
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("%w (HTTP %d)", ErrUnavailable, res.StatusCode)
+		return fmt.Errorf("%w (HTTP %d): %s %s: %s", ErrUnavailable, res.StatusCode, method, path, errorSnippet(res.Body))
 	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, 65537))
-	if err != nil || len(data) > 65536 {
-		return ErrUnavailable
+	if err != nil {
+		return fmt.Errorf("%w: %s %s: reading response: %v", ErrUnavailable, method, path, err)
 	}
-	if json.Unmarshal(data, out) != nil {
-		return ErrUnavailable
+	if len(data) > 65536 {
+		return fmt.Errorf("%w: %s %s: response larger than 64 KiB", ErrUnavailable, method, path)
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("%w: %s %s: invalid JSON response: %v", ErrUnavailable, method, path, err)
 	}
 	return nil
+}
+
+// errorSnippet returns the start of an error response body (the service's
+// own reason), single-line and bounded, for logs.
+func errorSnippet(body io.Reader) string {
+	data, _ := io.ReadAll(io.LimitReader(body, 300))
+	s := strings.Join(strings.Fields(string(data)), " ")
+	if s == "" {
+		return "(empty body)"
+	}
+	return s
 }
