@@ -105,7 +105,7 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
     <div v-if="wallet" class="balance-grid">
       <section class="balance-tile balance-tile-accent"><span>Available USDT</span><strong><AssetAmount :value="wallet.available" asset="USDT" /></strong><small>Confirmed funds for your package</small></section>
       <section class="balance-tile"><span>Available SIGNET</span><strong><AssetAmount :value="wallet.balances?.SIGNET?.available" asset="SIGNET" /></strong><small>Settled credits in your wallet</small></section>
-      <section class="balance-tile"><span>Locked SIGNET</span><strong><AssetAmount :value="wallet.balances?.SIGNET?.locked" asset="SIGNET" /></strong><small>Follow scheduled releases in <RouterLink to="/wallet/vesting">vesting</RouterLink></small></section>
+      <section class="balance-tile"><span>Locked SIGNET</span><strong><AssetAmount :value="wallet.balances?.SIGNET?.locked" asset="SIGNET" /></strong><small>Check Tier eligibility and releases in <RouterLink to="/wallet/vesting">vesting</RouterLink></small></section>
     </div>
     <div class="deposit-workspace">
     <section v-if="wallet" class="card wallet-panel">
@@ -132,7 +132,7 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
       <p v-else-if="purchase.status === 'awaiting_reopening' && purchase.reopening_status === 'review_required'" class="alert alert-warning" role="status">Replacement confirmation requires support review. Funds remain preserved and package funding is blocked. Do not submit another replacement or deposit again to resolve this state.</p>
       <p v-else-if="purchase.status === 'awaiting_reopening'" role="status">Your replacement placement is awaiting custody confirmation. Funds remain preserved; package funding will remain blocked until confirmation. Do not submit another replacement.</p>
       <p v-else-if="purchase.status === 'awaiting_commission_settlement'" role="status">Funding is confirmed. Team commissions and company USDT settlement are processing. Your cap will extend after settlement; do not deposit again for this purchase.</p>
-      <p v-else-if="purchase.status === 'completed'" role="status">{{ purchase.purchase_kind === 'topup' ? 'Top-up complete: your income cap has increased. No new purchaser bonus or vesting was created.' : 'Package active: your first-purchase allocation is managed in your vesting wallet.' }}</p>
+      <p v-else-if="purchase.status === 'completed'" role="status">{{ purchase.purchase_kind === 'topup' ? 'Top-up complete: your income cap has increased. No new purchaser bonus or vesting was created.' : 'Package active: purchased SIGNET and bonus are locked in your custodial wallet. A qualifying Tier plan is required to start vesting.' }}</p>
       <p v-else role="status">Purchase status: {{ purchase.status }}. Funds and financial records remain preserved.</p>
       <PurchaseActivation :purchase="purchase" :wallet="wallet" :disabled="busy || !!error || !!purchaseError" @refresh="refresh" @busy="activating = $event" />
     </section>

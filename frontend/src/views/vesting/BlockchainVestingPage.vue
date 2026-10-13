@@ -84,10 +84,13 @@ async function commitSwitch(s) {
   busy.value = true
   error.value = ''
   try {
-    await api.post('/blockchain/vesting/switch/commit', switchRequests.value[s.id])
+    const { data } = await api.post('/blockchain/vesting/switch/commit', switchRequests.value[s.id])
     delete switchRequests.value[s.id]
     delete switchPreviews.value[s.id]
-    message.value = 'Vesting plan updated. Previously released tokens are unchanged.'
+    const state = data.schedule?.status || data.status
+    message.value = ['recovery_pending', 'recovered'].includes(state)
+      ? 'Your earnings reached the allocation threshold. Vesting did not start; the remaining allocation is returning to treasury.'
+      : 'Vesting plan updated. Previously released tokens are unchanged.'
     await load()
   } catch (err) {
     if (err?.response?.status === 422) {
@@ -120,21 +123,36 @@ onUnmounted(() => { clearInterval(tickTimer); clearInterval(refreshTimer) })
       <input id="vesting-user" v-model="userId" class="form-control" inputmode="numeric" required :disabled="Object.keys(pending).length > 0" />
       <button class="btn btn-primary mt-2" :disabled="busy">Load vesting</button>
     </form>
-    <p v-if="!busy && !error && !schedules.length" class="wallet-empty">No vesting schedules yet. Your allocation will appear after package activation.</p>
+    <p v-if="!busy && !error && !schedules.length" class="wallet-empty">No allocations yet. Your purchased SIGNET and bonus will appear after package activation.</p>
     <section v-for="s in schedules" :key="s.id" class="card p-3 mb-3">
-      <h2 class="h5">Vesting #{{ s.id }} — {{ s.status }}</h2>
+      <h2 class="h5">Allocation #{{ s.id }} — {{ s.status === 'awaiting_tier' ? 'Waiting for qualifying Tier plan' : s.status === 'recovery_pending' ? 'Returning to treasury' : s.status === 'recovered' ? 'Returned to treasury' : s.status }}</h2>
+      <div v-if="s.tier_connection_required" class="alert alert-info" role="status">Your purchased SIGNET and bonus remain locked in your custodial wallet. No vesting accrues until you connect a qualifying Tier account and confirm Option 1 or 2. Team commissions remain subject to your income cap. <RouterLink v-if="!admin" to="/wallet/tier-link">Connect Tier account</RouterLink></div>
+      <p v-if="['recovery_pending', 'recovered'].includes(s.status)" class="alert alert-info" role="status">Your cumulative settled earnings reached this allocation’s token amount. The remaining locked allocation {{ s.status === 'recovered' ? 'has returned' : 'is returning' }} to treasury. Your earned available tokens and previous withdrawals remain yours.</p>
+      <p v-if="s.treasury_return_tx_hash" class="text-break small">Treasury return transaction: {{ s.treasury_return_tx_hash }}</p>
       <div class="vesting-summary"><div><span>Total allocation</span><strong><AssetAmount :value="s.total_amount" asset="SIGNET" /></strong></div><div><span>Released to wallet</span><strong><AssetAmount :value="s.released_amount" asset="SIGNET" /></strong></div></div>
       <div v-if="s.progress_estimate" class="mb-3">
         <p class="mb-1">Estimated vesting progress</p>
         <output class="vesting-odometer" aria-live="off">{{ vestingProgress(s, elapsedSinceFetch) ?? 'Refresh to see current estimate' }}<span v-if="vestingProgress(s, elapsedSinceFetch) !== null"> SIGNET</span></output>
         <p class="small text-muted">Display estimate only, updated each second. Tokens settle daily; this number is not a spendable wallet balance.</p>
       </div>
-      <dl class="vesting-dates"><div><dt>Start date</dt><dd>{{ s.starts_at }}</dd></div><div><dt>Lock ends</dt><dd>{{ s.cliff_ends_at || 'No cliff' }}</dd></div><div><dt>Completion</dt><dd>{{ s.ends_at }}</dd></div></dl>
+      <p v-if="s.recovery_threshold_signet" class="small">Settled commission and reward earnings: <AssetAmount :value="s.qualifying_earned_signet" asset="SIGNET" /> · Recovery threshold: <AssetAmount :value="s.recovery_threshold_signet" asset="SIGNET" />. Withdrawals do not reset earnings; deposits, purchases, bonuses, transfers and vesting releases do not count.</p>
+      <dl v-if="!['awaiting_tier', 'recovery_pending', 'recovered'].includes(s.status)" class="vesting-dates"><div><dt>Start date</dt><dd>{{ s.starts_at }}</dd></div><div><dt>Lock ends</dt><dd>{{ s.cliff_ends_at || 'No cliff' }}</dd></div><div><dt>Completion</dt><dd>{{ s.ends_at }}</dd></div></dl>
       <div v-if="!admin && (s.existing_user_switch_available || s.tier_switch_review_available || switchRequests[s.id])" class="mb-3">
-        <p>You may keep your current method. Option 1 releases over 10,000 days. Option 2 waits 2,000 days from purchase, then releases over 7,500 days. Existing-user switches spread the remaining allocation over 10,000 days.</p>
+        <p v-if="s.tier_switch_review_available">Only a qualifying linked Tier investment can start vesting. Option 1 releases over 10,000 days. Option 2 waits 2,000 days from purchase, then releases over 7,500 days. Tier eligibility uses invested amounts, excluding Tier bonuses and earnings.</p>
+        <p v-else>You may keep your current historical method or spread the remaining allocation over 10,000 days.</p>
         <button v-if="s.existing_user_switch_available && !switchPreviews[s.id] && !switchRequests[s.id]" class="btn btn-outline-primary" :disabled="busy" @click="previewSwitch(s)">Review 10,000-day switch</button>
         <button v-if="s.tier_switch_review_available && !switchPreviews[s.id] && !switchRequests[s.id]" class="btn btn-outline-primary" :disabled="busy" @click="previewSwitch(s, 'tier')">Check linked Tier eligibility</button>
         <div v-if="switchPreviews[s.id]">
+          <dl v-if="switchPreviews[s.id].eligibility" class="vesting-dates">
+            <div><dt>Package price (excluding fee)</dt><dd><AssetAmount :value="switchPreviews[s.id].eligibility.package_usd" asset="USDT" /></dd></div>
+            <div><dt>Qualifying Tier investment</dt><dd><AssetAmount :value="switchPreviews[s.id].eligibility.qualifying_usd" asset="USDT" /></dd></div>
+            <div><dt>Investment with 3,000-day duration</dt><dd><AssetAmount :value="switchPreviews[s.id].eligibility.qualifying_3000_day_usd" asset="USDT" /></dd></div>
+          </dl>
+          <p v-if="switchPreviews[s.id].eligibility" class="small text-muted">Verified Tier purchase IDs: {{ switchPreviews[s.id].eligibility.purchase_ids?.join(', ') || 'None' }}. Amounts exclude bonuses, earnings and refunded purchases.</p>
+          <details v-if="switchPreviews[s.id].eligibility" class="mb-3">
+            <summary>Exact investment totals</summary>
+            <p class="text-break small">Package price: {{ switchPreviews[s.id].eligibility.package_usd }} USDT<br />Qualifying Tier investment: {{ switchPreviews[s.id].eligibility.qualifying_usd }} USDT<br />Investment with 3,000-day duration: {{ switchPreviews[s.id].eligibility.qualifying_3000_day_usd }} USDT</p>
+          </details>
           <p v-if="switchPreviews[s.id].option === 'option_2'">Option 2: release starts after the 2,000-day wait measured from your package purchase date.</p>
           <p v-if="switchPreviews[s.id].option === 'option_1'">Option 1: your combined qualifying 3,000-day Tier investments match this package.</p>
           <p>Remaining: {{ switchPreviews[s.id].remaining_amount }} SIGNET · Daily: {{ switchPreviews[s.id].daily_release_amount }} SIGNET</p>
