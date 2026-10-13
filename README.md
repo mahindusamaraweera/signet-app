@@ -125,4 +125,3 @@ allows it.
 
 Everything else — every calculation, validation rule, hardcoded threshold,
 and status enum — is documented in `docs/`.
-
