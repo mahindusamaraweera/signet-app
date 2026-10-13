@@ -137,6 +137,7 @@ body.sg-dashboard .icon-shape[data-kind="earn"]{--ic-rgb:61,230,168}
 body.sg-dashboard .icon-shape[data-kind="pool"]{--ic-rgb:143,233,245}
 body.sg-dashboard .icon-shape[data-kind="share"]{--ic-rgb:111,168,255}
 body.sg-dashboard .icon-shape[data-kind="portion"]{--ic-rgb:61,230,168}
+body.sg-dashboard .icon-shape[data-kind="income"]{--ic-rgb:245,194,107}
 /* comet ring orbiting the icon */
 body.sg-dashboard .icon-shape::before{
   content:'';position:absolute;inset:-7px;border-radius:50%;pointer-events:none;padding:1.5px;
