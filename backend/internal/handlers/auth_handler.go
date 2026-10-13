@@ -6,6 +6,8 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -16,8 +18,11 @@ import (
 
 	"signet-backend/internal/app"
 	"signet-backend/internal/auth"
+	"signet-backend/internal/blockchain"
 	"signet-backend/internal/httpx"
 	"signet-backend/internal/models"
+	"signet-backend/internal/registrationverification"
+	"signet-backend/internal/securitymail"
 	"signet-backend/internal/tree"
 )
 
@@ -29,14 +34,15 @@ func RegisterAuthRoutes(r chi.Router, d *app.Deps) {
 	r.Get("/api/v1/me", d.Auth.OptionalAuth(http.HandlerFunc(meHandler(d))).ServeHTTP)
 
 	r.Get("/api/v1/register/referral", registerReferralHandler(d))
-	r.Post("/api/v1/register/step1", registerStep1Handler(d))
-	r.Get("/api/v1/register/step2/{id}", registerStep2FormHandler(d))
-	r.Post("/api/v1/register/step2", registerStep2SubmitHandler(d))
+	r.With(httpx.SecurityRateLimit(10, time.Minute)).Post("/api/v1/register/step1", registerStep1Handler(d))
+	r.With(httpx.SecurityRateLimit(10, time.Minute)).Post("/api/v1/register/verify-email", verifyRegistrationHandler(d))
+	r.Get("/api/v1/register/step2/{id}", d.Auth.OptionalAuth(registerStep2FormHandler(d)).ServeHTTP)
+	r.Post("/api/v1/register/step2", d.Auth.OptionalAuth(registerStep2SubmitHandler(d)).ServeHTTP)
 	r.Get("/api/v1/register/status", registerStatusHandler(d))
 
-	r.Post("/api/v1/password/email", passwordEmailHandler(d))
+	r.With(httpx.SecurityRateLimit(5, time.Minute)).Post("/api/v1/password/email", passwordEmailHandler(d))
 	r.Get("/api/v1/password/reset/{token}", passwordResetTokenHandler(d))
-	r.Post("/api/v1/password/reset", passwordResetHandler(d))
+	r.With(httpx.SecurityRateLimit(10, time.Minute)).Post("/api/v1/password/reset", passwordResetHandler(d))
 }
 
 // --- login/logout/me ---
@@ -75,6 +81,18 @@ func loginHandler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 
+		// Pending blockchain registrations can resume funding after signing in.
+		// The deadline controls unpaid cleanup, not access to deposited funds.
+		if d.Cfg.BlockchainEnabled && user.Role == "user" && user.Status == "pending" {
+			path, err := registrationLoginPath(d, user.ID)
+			if err != nil {
+				httpx.Error(w, 503, "Registration status temporarily unavailable")
+				return
+			}
+			httpx.OK(w, map[string]interface{}{"status": "success", "redirect": path, "role": user.Role})
+			return
+		}
+
 		var packageCount int
 		_ = d.DB.Get(&packageCount, "SELECT COUNT(*) FROM user_packages WHERE user_id = ?", user.ID)
 
@@ -86,7 +104,7 @@ func loginHandler(d *app.Deps) http.HandlerFunc {
 			var pendingID models.NullInt64
 			_ = d.DB.Get(&pendingID, "SELECT id FROM user_packages WHERE user_id = ? AND status = 'pending' LIMIT 1", user.ID)
 			if pendingID.Valid {
-				httpx.OK(w, map[string]interface{}{"status": "error", "message": "You're package is pending"})
+				httpx.OK(w, map[string]interface{}{"status": "error", "message": "Your package is pending"})
 				return
 			}
 			httpx.OK(w, map[string]interface{}{"status": "success", "role": user.Role, "dashboard": user.Role + ".dashboard"})
@@ -96,6 +114,17 @@ func loginHandler(d *app.Deps) http.HandlerFunc {
 		// has no package at all; matches the original exactly (not a logout).
 		httpx.OK(w, map[string]interface{}{"status": "error", "message": "You do not have any package"})
 	}
+}
+
+func registrationLoginPath(d *app.Deps, userID uint64) (string, error) {
+	var count int
+	if err := d.DB.Get(&count, "SELECT COUNT(*) FROM package_purchase_intents WHERE user_id=?", userID); err != nil {
+		return "", err
+	}
+	if count > 0 {
+		return "/register/funding/" + strconv.FormatUint(userID, 10), nil
+	}
+	return "/register/step2/" + strconv.FormatUint(userID, 10), nil
 }
 
 func logoutHandler(d *app.Deps) http.HandlerFunc {
@@ -112,8 +141,18 @@ func meHandler(d *app.Deps) http.HandlerFunc {
 			httpx.JSON(w, http.StatusOK, map[string]interface{}{"authenticated": false})
 			return
 		}
+		loginPath := ""
+		if d.Cfg.BlockchainEnabled && user.Role == "user" && user.Status == "pending" {
+			var err error
+			loginPath, err = registrationLoginPath(d, user.ID)
+			if err != nil {
+				httpx.Error(w, 503, "Registration status temporarily unavailable")
+				return
+			}
+		}
 		httpx.OK(w, map[string]interface{}{
-			"authenticated": true,
+			"registration_path": loginPath,
+			"authenticated":     true,
 			"user": map[string]interface{}{
 				"id":          user.ID,
 				"signet_id":   models.SignetID(user.ID),
@@ -145,7 +184,11 @@ func registerReferralHandler(d *app.Deps) http.HandlerFunc {
 		}
 
 		var lastRefUser models.User
-		err := d.DB.Get(&lastRefUser, "SELECT * FROM users WHERE referred_by = ? ORDER BY id DESC LIMIT 1", referral.UserID)
+		latestQuery := "SELECT * FROM users WHERE referred_by = ?"
+		if d.Cfg.RegistrationExpiryEnabled {
+			latestQuery += " AND NOT EXISTS (SELECT 1 FROM registration_expiries e WHERE e.user_id=users.id)"
+		}
+		err := d.DB.Get(&lastRefUser, latestQuery+" ORDER BY id DESC LIMIT 1", referral.UserID)
 		if err == nil {
 			var activeCount int
 			_ = d.DB.Get(&activeCount, "SELECT COUNT(*) FROM user_packages WHERE user_id = ? AND status = 'active'", lastRefUser.ID)
@@ -161,10 +204,11 @@ func registerReferralHandler(d *app.Deps) http.HandlerFunc {
 		_ = d.DB.Select(&leaders, "SELECT * FROM users WHERE leader_status = 'active'")
 
 		httpx.OK(w, map[string]interface{}{
-			"status":        "success",
-			"referral_code": code,
-			"countries":     countries,
-			"leaders":       leaderOptions(leaders),
+			"status":             "success",
+			"referral_code":      code,
+			"countries":          countries,
+			"leaders":            leaderOptions(leaders),
+			"blockchain_enabled": d.Cfg.BlockchainEnabled,
 		})
 	}
 }
@@ -179,6 +223,10 @@ func leaderOptions(leaders []models.User) []map[string]interface{} {
 
 func registerStep1Handler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if d.Registration == nil {
+			httpx.Error(w, 503, "Registration email verification is temporarily unavailable")
+			return
+		}
 		var body struct {
 			Name            string `json:"name"`
 			Email           string `json:"email"`
@@ -212,7 +260,7 @@ func registerStep1Handler(d *app.Deps) http.HandlerFunc {
 		if body.CountryCode == "" {
 			errs["country_code"] = []string{"The country code field is required."}
 		}
-		if body.BinancePayID == "" {
+		if body.BinancePayID == "" && !d.Cfg.BlockchainEnabled {
 			errs["binance_pay_id"] = []string{"The binance pay id field is required."}
 		}
 		if body.Country == "" {
@@ -250,7 +298,10 @@ func registerStep1Handler(d *app.Deps) http.HandlerFunc {
 			httpx.OK(w, map[string]interface{}{"status": "error", "message": "The WhatsApp number is already registered."})
 			return
 		}
-		_ = d.DB.Get(&dupe, "SELECT COUNT(*) FROM users WHERE binance_pay_id = ?", body.BinancePayID)
+		dupe = 0
+		if body.BinancePayID != "" {
+			_ = d.DB.Get(&dupe, "SELECT COUNT(*) FROM users WHERE binance_pay_id = ?", body.BinancePayID)
+		}
 		if dupe > 0 {
 			httpx.OK(w, map[string]interface{}{"status": "error", "message": "The Binance Pay ID is already registered."})
 			return
@@ -261,69 +312,89 @@ func registerStep1Handler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 
-		hashed, err := auth.HashPassword(body.Password)
+		countryID, err := strconv.ParseUint(body.Country, 10, 64)
+		if err != nil || countryID == 0 {
+			httpx.Error(w, 422, "Invalid country")
+			return
+		}
+		id, err := d.Registration.Issue(r.Context(), body.Email, body.Password, registrationverification.Data{
+			Name: body.Name, Whatsapp: whatsapp, CountryID: countryID, ReferralCode: body.ReferralCode,
+			LeaderCode: body.LeaderCode, ExecutiveCode: body.ExecutiveCode, BinancePayID: body.BinancePayID,
+		}, time.Now().UTC())
+		if errors.Is(err, registrationverification.ErrResendLimit) {
+			httpx.Error(w, 429, "Please wait before requesting another verification email")
+			return
+		}
 		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not process password")
+			// The reason stays server-side (journalctl -u signet-api); the
+			// client only learns that delivery failed.
+			log.Printf("register/step1: verification email to %s failed: %v", body.Email, err)
+			httpx.Error(w, 503, "Unable to send registration verification email")
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.JSON(w, 202, map[string]interface{}{"status": "verification_required", "registration_id": id,
+			"message": "Verification email sent. Your account will be created after verification."})
+	}
+}
 
-		countryID, _ := strconv.ParseUint(body.Country, 10, 64)
-
-		tx, err := d.DB.Beginx()
+func verifyRegistrationHandler(d *app.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if d.Registration == nil {
+			httpx.Error(w, 503, "Registration email verification is temporarily unavailable")
+			return
+		}
+		var body struct {
+			ID    string `json:"id"`
+			Token string `json:"token"`
+		}
+		if err := decodeJSON(r, &body); err != nil {
+			httpx.Error(w, 422, "Invalid verification request")
+			return
+		}
+		id, err := d.Registration.Complete(r.Context(), body.ID, body.Token, time.Now().UTC())
+		if errors.Is(err, registrationverification.ErrVerification) || errors.Is(err, registrationverification.ErrEmailExists) {
+			httpx.Error(w, 422, "Verification link is invalid, expired or already used. Please log in or register again.")
+			return
+		}
 		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Database error")
+			httpx.Error(w, 503, "Registration verification temporarily unavailable")
 			return
 		}
-		defer tx.Rollback()
-
-		res, err := tx.Exec(`INSERT INTO users
-			(name, email, password, whatsapp_number, binance_pay_id, status, leader_code, executive_code, referred_by, country_id, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, NOW(), NOW())`,
-			body.Name, body.Email, hashed, whatsapp, body.BinancePayID,
-			ltrimZero(body.LeaderCode), ltrimZero(body.ExecutiveCode), referral.UserID, countryID)
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not create account")
+		// The session must be issued from the stored row: its credential
+		// version is derived from the password hash and re-checked on every
+		// request, so a bare {ID, Role} user produced a session that was
+		// silently rejected ("Registration ownership required" at step 2).
+		var created models.User
+		if err := d.DB.Get(&created, "SELECT * FROM users WHERE id = ?", id); err != nil {
+			httpx.Error(w, 500, "Email verified and account created. Please log in to continue.")
 			return
 		}
-		newID, _ := res.LastInsertId()
-
-		if _, err := tx.Exec("INSERT INTO wallets (user_id, balance, created_at, updated_at) VALUES (?, 0, NOW(), NOW())", newID); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not create wallet")
+		if err := d.Auth.IssueSession(w, &created); err != nil {
+			httpx.Error(w, 500, "Email verified and account created. Please log in to continue.")
 			return
 		}
-
-		newReferralCode := randomUpperString(6)
-		if _, err := tx.Exec("INSERT INTO referral_codes (user_id, code, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", newID, newReferralCode); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not create referral code")
-			return
-		}
-
-		plainKey := "USER-" + strconv.FormatInt(newID, 10) + "-" + randomString(40)
-		hashedKey, err := auth.HashPassword(plainKey)
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not create secret key")
-			return
-		}
-		if _, err := tx.Exec("INSERT INTO user_secret_keys (user_id, secret_key, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", newID, hashedKey); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not create secret key")
-			return
-		}
-
-		if err := tx.Commit(); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Database error")
-			return
-		}
-
-		httpx.OK(w, map[string]interface{}{"status": "success", "user_id": newID})
+		httpx.OK(w, map[string]interface{}{"status": "success", "user_id": id, "blockchain_enabled": d.Cfg.BlockchainEnabled})
 	}
 }
 
 func registerStep2FormHandler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
+		if d.Cfg.BlockchainEnabled {
+			user := auth.UserFromContext(r.Context())
+			if user == nil || strconv.FormatUint(user.ID, 10) != id {
+				httpx.Error(w, 403, "Registration ownership required")
+				return
+			}
+		}
 		var packages []models.Package
-		_ = d.DB.Select(&packages, "SELECT * FROM packages WHERE status = 'active'")
-		httpx.OK(w, map[string]interface{}{"status": "success", "id": id, "packages": packages})
+		if err := d.DB.Select(&packages, "SELECT * FROM packages WHERE status = 'active'"); err != nil {
+			httpx.Error(w, 503, "Package catalog temporarily unavailable")
+			return
+		}
+		httpx.OK(w, map[string]interface{}{"status": "success", "id": id, "packages": purchasePackageChoices(packages, d.Cfg.BlockchainEnabled), "blockchain_enabled": d.Cfg.BlockchainEnabled})
 	}
 }
 
@@ -343,6 +414,22 @@ func registerStep2SubmitHandler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 		packageID, err := strconv.ParseUint(body.Package, 10, 64)
+		if d.Cfg.BlockchainEnabled {
+			user := auth.UserFromContext(r.Context())
+			if user == nil || user.ID != newUserID {
+				httpx.Error(w, 403, "Registration ownership required")
+				return
+			}
+			var existing int
+			if err := d.DB.Get(&existing, "SELECT COUNT(*) FROM package_purchase_intents WHERE user_id=?", newUserID); err != nil {
+				httpx.Error(w, 500, "Database error")
+				return
+			}
+			if existing > 0 {
+				httpx.OK(w, map[string]interface{}{"status": "success", "user_id": newUserID, "blockchain_enabled": true})
+				return
+			}
+		}
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "Invalid package id")
 			return
@@ -354,12 +441,34 @@ func registerStep2SubmitHandler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 
+		tx, err := d.DB.Beginx()
+		if err != nil {
+			httpx.Error(w, 500, "Database error")
+			return
+		}
+		defer tx.Rollback()
+		if d.Cfg.BlockchainEnabled {
+			var lockedID uint64
+			if e := tx.Get(&lockedID, "SELECT id FROM users WHERE id=? FOR UPDATE", newUserID); e != nil {
+				httpx.Error(w, 500, "Database error")
+				return
+			}
+			var existing int
+			if e := tx.Get(&existing, "SELECT COUNT(*) FROM package_purchase_intents WHERE user_id=?", newUserID); e != nil {
+				httpx.Error(w, 500, "Database error")
+				return
+			}
+			if existing > 0 {
+				httpx.OK(w, map[string]interface{}{"status": "success", "user_id": newUserID, "blockchain_enabled": true})
+				return
+			}
+		}
 		var createdIDs []uint64
 		referredBy := uint64(0)
 		if userData.ReferredBy.Valid {
 			referredBy = uint64(userData.ReferredBy.Int64)
 		}
-		parentID, err := tree.ParentFind(d.DB, referredBy, packageID, newUserID, 1, &createdIDs)
+		parentID, err := tree.ParentFind(tx, referredBy, packageID, newUserID, 1, &createdIDs)
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "Could not resolve upline placement")
 			return
@@ -371,13 +480,6 @@ func registerStep2SubmitHandler(d *app.Deps) http.HandlerFunc {
 		} else {
 			userparent = parentID
 		}
-
-		tx, err := d.DB.Beginx()
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Database error")
-			return
-		}
-		defer tx.Rollback()
 
 		res, err := tx.Exec(`INSERT INTO user_parents (user_id, virtual_id, parent_id, node, created_at, updated_at)
 			VALUES (?, ?, ?, 'deactive', NOW(), NOW())`, newUserID, referredBy, userparent)
@@ -447,7 +549,7 @@ func registerStep2SubmitHandler(d *app.Deps) http.HandlerFunc {
 		}
 
 		var buyPackage models.Package
-		if err := tx.Get(&buyPackage, "SELECT * FROM packages WHERE id = ?", packageID); err != nil {
+		if err := tx.Get(&buyPackage, "SELECT * FROM packages WHERE id = ? AND status = 'active'", packageID); err != nil {
 			httpx.Error(w, http.StatusNotFound, "Package not found")
 			return
 		}
@@ -484,6 +586,26 @@ func registerStep2SubmitHandler(d *app.Deps) http.HandlerFunc {
 			createdIDsJSON += strconv.FormatUint(id, 10)
 		}
 		createdIDsJSON += "]"
+		if d.Cfg.BlockchainEnabled {
+			if buyPackage.Status != "active" || buyPackage.Price <= 0 {
+				httpx.Error(w, 400, "Package is unavailable")
+				return
+			}
+			var percentage int64
+			if e := tx.Get(&percentage, `SELECT p.commission FROM user_packages up JOIN packages p ON p.id=CAST(up.package AS UNSIGNED) WHERE up.user_id=? AND up.status='active' ORDER BY p.price DESC LIMIT 1`, findParent.ParentID); e != nil && e != sql.ErrNoRows {
+				httpx.Error(w, 500, "Could not determine commission")
+				return
+			}
+			terms, e := blockchain.CommercialPackageTerms(buyPackage.Price)
+			if e != nil {
+				httpx.Error(w, 422, "Package commercial terms are not approved")
+				return
+			}
+			if _, e := tx.Exec(`INSERT INTO package_purchase_intents (user_id,user_package_id,package_price,remaining_usdt,commission_user_id,commission_percent,service_fee_usdt,required_usdt,bonus_percent) VALUES (?,?,?,?,?,?,?,?,?)`, newUserID, newUserPackageID, buyPackage.Price, terms.Required, findParent.ParentID, percentage, terms.Fee, terms.Required, terms.BonusPercent); e != nil {
+				httpx.Error(w, 500, "Could not create purchase intent")
+				return
+			}
+		}
 		_, _ = tx.Exec(`INSERT INTO user_parent_map_logs (user_id, parent_id, created_row_ids, note, created_at, updated_at)
 			VALUES (?, ?, ?, 'UserParent rows created in processStep2', NOW(), NOW())`, newUserID, parentID, createdIDsJSON)
 
@@ -506,7 +628,8 @@ func registerStep2SubmitHandler(d *app.Deps) http.HandlerFunc {
 				"whatsapp_number": parentData.WhatsappNumber.String,
 				"on_vacation":     parentData.OnVacation,
 			},
-			"user_id": newUserID,
+			"user_id":            newUserID,
+			"blockchain_enabled": d.Cfg.BlockchainEnabled,
 		})
 	}
 }
@@ -543,47 +666,22 @@ func registerStatusHandler(d *app.Deps) http.HandlerFunc {
 // --- password reset ---
 
 func passwordEmailHandler(d *app.Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Email string `json:"email"`
-		}
-		if err := decodeJSON(r, &body); err != nil || !emailRe.MatchString(body.Email) {
-			httpx.ValidationError(w, map[string][]string{"email": {"The email field must be a valid email address."}})
-			return
-		}
-		var exists int
-		_ = d.DB.Get(&exists, "SELECT COUNT(*) FROM users WHERE email = ?", body.Email)
-		if exists == 0 {
-			httpx.ValidationError(w, map[string][]string{"email": {"The selected email is invalid."}})
-			return
-		}
-
-		token := randomString(60)
-		_, err := d.DB.Exec(`INSERT INTO password_reset (email, token, created_at) VALUES (?, ?, NOW())
-			ON DUPLICATE KEY UPDATE token = VALUES(token), created_at = NOW()`, body.Email, token)
-		if err != nil {
-			// password_reset has no PK/unique key (preserved verbatim per
-			// schema.md), so ON DUPLICATE KEY UPDATE is a no-op guard, not
-			// a real upsert — fall back to plain insert on any error shape
-			// other than a real DB failure.
-			_, err = d.DB.Exec("INSERT INTO password_reset (email, token, created_at) VALUES (?, ?, NOW())", body.Email, token)
-			if err != nil {
-				httpx.Error(w, http.StatusInternalServerError, "Could not create reset token")
-				return
-			}
-		}
-
-		go sendPasswordResetMail(d, body.Email, token)
-
-		httpx.OK(w, map[string]interface{}{"status": "success", "message": "We have emailed your password reset link!"})
-	}
+	return passwordEmailRequestHandler(func(r *http.Request, email string) error {
+		return issuePasswordReset(r.Context(), d.DB.DB, email, d.Cfg.AppURL, time.Now().UTC(), securitymail.New(d.Cfg))
+	})
 }
 
 func passwordResetTokenHandler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := chi.URLParam(r, "token")
+		lookup, err := passwordResetLookup(token)
+		if err != nil {
+			httpx.Error(w, 422, "Invalid reset token")
+			return
+		}
 		var email string
-		if err := d.DB.Get(&email, "SELECT email FROM password_reset WHERE token = ? LIMIT 1", token); err != nil {
+		w.Header().Set("Cache-Control", "no-store")
+		if err := d.DB.Get(&email, "SELECT email FROM password_reset WHERE token = ? AND delivery_status IN ('legacy','delivered') AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR) AND created_at <= NOW() LIMIT 1", lookup); err != nil {
 			httpx.OK(w, map[string]interface{}{"status": "error", "message": "This password reset token is invalid."})
 			return
 		}
@@ -620,26 +718,16 @@ func passwordResetHandler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 
-		var resetEmail string
-		if err := d.DB.Get(&resetEmail, "SELECT email FROM password_reset WHERE token = ? LIMIT 1", body.Token); err != nil {
+		w.Header().Set("Cache-Control", "no-store")
+		err := completePasswordReset(r.Context(), d.DB.DB, body.Email, body.Token, body.Password, time.Now().UTC())
+		if errors.Is(err, errResetProof) {
 			httpx.ValidationError(w, map[string][]string{"token": {"This password reset token is invalid."}})
 			return
 		}
-		var user models.User
-		if err := d.DB.Get(&user, "SELECT * FROM users WHERE email = ?", resetEmail); err != nil {
-			httpx.ValidationError(w, map[string][]string{"email": {"No user found with that email address."}})
-			return
-		}
-		hashed, err := auth.HashPassword(body.Password)
 		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not process password")
-			return
-		}
-		if _, err := d.DB.Exec("UPDATE users SET password = ?, updated_at = NOW() WHERE id = ?", hashed, user.ID); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "Could not update password")
 			return
 		}
-		_, _ = d.DB.Exec("DELETE FROM password_reset WHERE email = ?", resetEmail)
 
 		httpx.OK(w, map[string]interface{}{"status": "success", "message": "Your password has been reset!"})
 	}

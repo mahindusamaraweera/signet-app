@@ -18,6 +18,7 @@ import sweetalertCss from 'sweetalert2/dist/sweetalert2.min.css?inline'
 import voltCss from './assets/theme/volt.css?inline'
 import customeCss from './assets/theme/custome.css?inline'
 import appCss from './assets/app.css?inline'
+import workspaceCss from './assets/workspace.css?inline'
 // Select2's stylesheet (the original loads it on the pages that use Select2);
 // signet-ui.css restyles it, so it goes before the Signet layer.
 import select2Css from 'select2/dist/css/select2.min.css?inline'
@@ -30,7 +31,7 @@ import { useAuthStore } from './store/auth'
 
 const appSkin = document.createElement('style')
 appSkin.id = 'signet-app-skin'
-appSkin.textContent = [sweetalertCss, voltCss, customeCss, appCss, select2Css, signetUiCss, signetDashboardCss].join('\n')
+appSkin.textContent = [sweetalertCss, voltCss, customeCss, appCss, select2Css, signetUiCss, signetDashboardCss, workspaceCss].join('\n')
 document.head.appendChild(appSkin)
 
 router.afterEach((to) => {

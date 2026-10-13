@@ -3,17 +3,27 @@
 // route('password.update')). See passwordResetHandler in auth_handler.go.
 // As in the original, the email field starts empty, field errors show under
 // their inputs, and a successful reset lands on the login page.
-import { reactive, ref } from 'vue'
+import { reactive, ref, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import AuthCardLayout from '@/components/layout/AuthCardLayout.vue'
 
 const props = defineProps({
-  token: { type: String, required: true },
+  token: { type: String, default: '' },
 })
 
 const router = useRouter()
+// Keep new reset proofs in memory, not request URLs or persistent storage.
+const token = ref(new URLSearchParams(window.location.hash.slice(1)).get('token') || props.token)
+if (window.location.hash) {
+  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+}
 const form = reactive({ email: '', password: '', password_confirmation: '' })
+onBeforeUnmount(() => {
+  token.value = ''
+  form.password = ''
+  form.password_confirmation = ''
+})
 const errors = ref({})
 const submitting = ref(false)
 
@@ -22,7 +32,7 @@ async function onSubmit() {
   submitting.value = true
   try {
     const { data } = await api.post('/password/reset', {
-      token: props.token,
+      token: token.value,
       email: form.email,
       password: form.password,
       password_confirmation: form.password_confirmation,
@@ -35,6 +45,8 @@ async function onSubmit() {
   } catch (err) {
     errors.value = err?.response?.data?.errors || {}
   } finally {
+    form.password = ''
+    form.password_confirmation = ''
     submitting.value = false
   }
 }

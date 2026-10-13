@@ -1,11 +1,5 @@
 <script setup>
-// Ports auth/login.blade.php (route('login') / route('login.post')).
-// See auth_handler.go's loginHandler: a `status:'success'` response always
-// means the session is good to go to the dashboard; a `status:'error'`
-// response ("You do not have any package" / "You're package is pending" /
-// "Invalid credentials") is NOT necessarily a failed login — the session
-// cookie is issued before those checks run, so we always refresh the auth
-// store afterwards and only gate the dashboard redirect on `status`.
+// Successful pending registrations resume their funding/status page.
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
@@ -36,7 +30,7 @@ async function onSubmit() {
     // package) — so refresh the shared auth state regardless of status.
     await authStore.bootstrap()
     if (data.status === 'success') {
-      router.push(authStore.dashboardRoute)
+      router.push(data.redirect || authStore.landingRoute)
     } else {
       flashMessage.value = data.message || 'Invalid credentials'
     }

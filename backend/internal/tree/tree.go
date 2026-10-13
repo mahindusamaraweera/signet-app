@@ -22,12 +22,31 @@ import (
 // original.
 var activeLikeNodes = []string{"active", "gratitude", "correct"}
 
+// PlacementStore allows the unchanged placement algorithm to participate in
+// the caller's transaction, including its intermediate tree/log writes.
+type PlacementStore interface {
+	Get(interface{}, string, ...interface{}) error
+	Exec(string, ...interface{}) (sql.Result, error)
+	Rebind(string) string
+}
+
+func placementCapCheck(db PlacementStore, userID, packageID uint64) (int, error) {
+	switch store := db.(type) {
+	case *sqlx.Tx:
+		return wallet.CheckWalletTx(store, userID, packageID)
+	case *sqlx.DB:
+		return wallet.CheckWallet(store, userID, packageID)
+	default:
+		return 0, fmt.Errorf("unsupported placement cap store")
+	}
+}
+
 // ParentFind ports ParentFind($id, $package, $currentUser, $i, &$createdIds).
 // id is the current node being evaluated (starts as the referrer's id);
 // currentUser is the user actually activating (used for super_parent_logs);
 // i is the recursion-depth counter; createdIds accumulates ids of every
 // user_parents row created along the way.
-func ParentFind(db *sqlx.DB, id, packageID, currentUser uint64, i int, createdIds *[]uint64) (uint64, error) {
+func ParentFind(db PlacementStore, id, packageID, currentUser uint64, i int, createdIds *[]uint64) (uint64, error) {
 	if id == 1 {
 		return 1, nil // root/company sentinel — matches User::where('id',1)->first()?.id
 	}
@@ -67,7 +86,7 @@ func ParentFind(db *sqlx.DB, id, packageID, currentUser uint64, i int, createdId
 			*createdIds = append(*createdIds, newID)
 			return SuperParentFind(db, parent.VirtualID, packageID, currentUser, i, createdIds)
 		}
-		activation, err := wallet.CheckWallet(db, parent.VirtualID, packageID)
+		activation, err := placementCapCheck(db, parent.VirtualID, packageID)
 		if err != nil {
 			return 0, err
 		}
@@ -93,7 +112,7 @@ func ParentFind(db *sqlx.DB, id, packageID, currentUser uint64, i int, createdId
 		if parent == nil {
 			return 0, nil
 		}
-		activation, err := wallet.CheckWallet(db, parent.VirtualID, packageID)
+		activation, err := placementCapCheck(db, parent.VirtualID, packageID)
 		if err != nil {
 			return 0, err
 		}
@@ -105,7 +124,7 @@ func ParentFind(db *sqlx.DB, id, packageID, currentUser uint64, i int, createdId
 }
 
 // SuperParentFind ports superParentFind($virtualParent, $package, $currentUser, $i, &$createdIds).
-func SuperParentFind(db *sqlx.DB, virtualParent, packageID, currentUser uint64, i int, createdIds *[]uint64) (uint64, error) {
+func SuperParentFind(db PlacementStore, virtualParent, packageID, currentUser uint64, i int, createdIds *[]uint64) (uint64, error) {
 	activeOrderCount, err := countUserParentByVirtual(db, virtualParent, activeLikeNodes)
 	if err != nil {
 		return 0, err
@@ -154,7 +173,7 @@ func SuperParentFind(db *sqlx.DB, virtualParent, packageID, currentUser uint64, 
 		if parent == nil {
 			return 0, nil
 		}
-		activation, err := wallet.CheckWallet(db, parent.VirtualID, packageID)
+		activation, err := placementCapCheck(db, parent.VirtualID, packageID)
 		if err != nil {
 			return 0, err
 		}
@@ -165,7 +184,7 @@ func SuperParentFind(db *sqlx.DB, virtualParent, packageID, currentUser uint64, 
 	}
 }
 
-func checkAndLogFirstTimeSuper(db *sqlx.DB, virtualParent, packageID, currentUser uint64, i int) (bool, error) {
+func checkAndLogFirstTimeSuper(db PlacementStore, virtualParent, packageID, currentUser uint64, i int) (bool, error) {
 	var exists int
 	err := db.Get(&exists, `
 		SELECT COUNT(*) FROM super_parent_logs
@@ -197,7 +216,7 @@ type userParentRow struct {
 	Node      string `db:"node"`
 }
 
-func countUserParentByVirtual(db *sqlx.DB, virtualID uint64, nodes []string) (int, error) {
+func countUserParentByVirtual(db PlacementStore, virtualID uint64, nodes []string) (int, error) {
 	query, args, err := sqlx.In("SELECT COUNT(*) FROM user_parents WHERE virtual_id = ? AND node IN (?)", virtualID, nodes)
 	if err != nil {
 		return 0, err
@@ -210,7 +229,7 @@ func countUserParentByVirtual(db *sqlx.DB, virtualID uint64, nodes []string) (in
 	return count, nil
 }
 
-func firstUserParentByVirtual(db *sqlx.DB, virtualID uint64, nodes []string) (*userParentRow, error) {
+func firstUserParentByVirtual(db PlacementStore, virtualID uint64, nodes []string) (*userParentRow, error) {
 	query, args, err := sqlx.In("SELECT id, user_id, virtual_id, parent_id, node FROM user_parents WHERE virtual_id = ? AND node IN (?) LIMIT 1", virtualID, nodes)
 	if err != nil {
 		return nil, err
@@ -226,7 +245,7 @@ func firstUserParentByVirtual(db *sqlx.DB, virtualID uint64, nodes []string) (*u
 	return &row, nil
 }
 
-func firstUserParentByUserID(db *sqlx.DB, userID uint64) (*userParentRow, error) {
+func firstUserParentByUserID(db PlacementStore, userID uint64) (*userParentRow, error) {
 	var row userParentRow
 	err := db.Get(&row, "SELECT id, user_id, virtual_id, parent_id, node FROM user_parents WHERE user_id = ? LIMIT 1", userID)
 	if err == sql.ErrNoRows {
@@ -238,7 +257,7 @@ func firstUserParentByUserID(db *sqlx.DB, userID uint64) (*userParentRow, error)
 	return &row, nil
 }
 
-func insertUserParent(db *sqlx.DB, userID, virtualID, parentID uint64, node string) (uint64, error) {
+func insertUserParent(db PlacementStore, userID, virtualID, parentID uint64, node string) (uint64, error) {
 	res, err := db.Exec(`INSERT INTO user_parents (user_id, virtual_id, parent_id, node, created_at, updated_at)
 		VALUES (?, ?, ?, ?, NOW(), NOW())`, userID, virtualID, parentID, node)
 	if err != nil {
@@ -252,7 +271,7 @@ func insertUserParent(db *sqlx.DB, userID, virtualID, parentID uint64, node stri
 // status = 'inactive' (false/no-error if the user doesn't exist, matching
 // the original's `$checkActive ? $checkActive->status : 'Not Found'`
 // defensive read).
-func userIsInactive(db *sqlx.DB, userID uint64) (bool, error) {
+func userIsInactive(db PlacementStore, userID uint64) (bool, error) {
 	var status sql.NullString
 	err := db.Get(&status, "SELECT status FROM users WHERE id = ?", userID)
 	if err == sql.ErrNoRows {

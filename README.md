@@ -49,10 +49,15 @@ The API reads all configuration from environment variables (see
 connection, `SESSION_SECRET`/`SESSION_LIFETIME` for the session cookie,
 `MAIL_*` for outbound email, `MINING_WEBHOOK_*` for the optional mining
 webhook job, `FRONTEND_ORIGIN` for CORS, and `ENABLE_SCHEDULER` to control
-whether this process runs the recurring background jobs (mining:update,
+whether this process runs the recurring background jobs, including enabled
+blockchain package activation (mining:update,
 mining:send-webhook, packages:weekly-sum, share:calculate — leave `true`
 for a single-instance deployment; set `false` on every instance but one if
 you run more than one API process against the same database).
+
+Package activation uses the in-process scheduler; it needs no separate cron
+entry. See [automatic activation setup](DEPLOYMENT.md#automatic-package-activation)
+for the custody-service settings, migrations and manual activation fallback.
 
 Verify the backend builds and passes static checks any time you change it:
 

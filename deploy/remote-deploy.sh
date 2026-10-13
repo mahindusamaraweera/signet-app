@@ -99,6 +99,13 @@ if [[ -f "$bin" ]]; then
 fi
 install -o "${owner%%:*}" -g "${owner##*:}" -m 0755 "$rel/signet-api" "$bin.new"
 mv -f "$bin.new" "$bin"
+# Let the API read its own journal for GET /api/v1/admin/logs (read-only
+# group; takes effect with the restart below). Idempotent.
+svc_user="$(systemctl show -p User --value "$SERVICE" 2>/dev/null || true)"
+if [[ -n "$svc_user" && "$svc_user" != root ]] && getent group systemd-journal >/dev/null &&
+	! id -nG "$svc_user" 2>/dev/null | tr ' ' '\n' | grep -qx systemd-journal; then
+	usermod -aG systemd-journal "$svc_user" && log "added $svc_user to systemd-journal (admin log viewer)"
+fi
 log "restarting $SERVICE"
 systemctl restart "$SERVICE"
 

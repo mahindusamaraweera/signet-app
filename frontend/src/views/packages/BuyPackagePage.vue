@@ -9,13 +9,14 @@
 // re-fetch this from, so per FRONTEND_CONVENTIONS the response is stashed
 // (sessionStorage) and the SPA navigates to buy.package.done, which reads
 // it back rather than re-fetching.
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
 import AuthCardLayout from '@/components/layout/AuthCardLayout.vue'
 import FlashAlert from '@/components/shared/FlashAlert.vue'
 import { useApiAction } from '@/composables/useApiAction'
+import { visiblePackageChoices } from '@/utils/packageDisplay'
 
 const router = useRouter()
 const { run } = useApiAction()
@@ -24,7 +25,15 @@ const loading = ref(true)
 const loadError = ref('')
 const packages = ref([])
 const selectedPackage = ref('')
+const blockchainEnabled = ref(false)
+const topupEnabled = ref(false)
+const showLowerPackages = ref(false)
+const visiblePackages = computed(() => visiblePackageChoices(packages.value, blockchainEnabled.value, showLowerPackages.value))
+const selected = computed(() => packages.value.find(p => String(p.id) === String(selectedPackage.value)))
 const submitting = ref(false)
+watch(visiblePackages, choices => {
+  if (selectedPackage.value && !choices.some(p => String(p.id) === String(selectedPackage.value))) selectedPackage.value = ''
+})
 
 async function fetchPackages() {
   loading.value = true
@@ -32,6 +41,8 @@ async function fetchPackages() {
   try {
     const { data } = await api.get('/buy-package')
     packages.value = data.packages || []
+    blockchainEnabled.value = !!data.blockchain_enabled
+    topupEnabled.value = !!data.topup_enabled
   } catch (err) {
     loadError.value = err?.response?.data?.message || 'Could not load packages.'
   } finally {
@@ -40,7 +51,7 @@ async function fetchPackages() {
 }
 
 async function submit() {
-  if (!selectedPackage.value) return
+  if (submitting.value || loading.value || !selectedPackage.value || (blockchainEnabled.value && !topupEnabled.value)) return
   submitting.value = true
   // No separate "saved" alert — the response drives the very next screen
   // (Upliner Activation), matching the original's direct-redirect flow.
@@ -49,6 +60,10 @@ async function submit() {
   })
   submitting.value = false
   if (ok) {
+    if (data.blockchain_enabled) {
+      router.push('/wallet/deposits')
+      return
+    }
     sessionStorage.setItem('signet:buyPackageDone', JSON.stringify(data.parent_data))
     router.push({ name: 'buy.package.done' })
   }
@@ -60,17 +75,23 @@ onMounted(fetchPackages)
 <template>
   <!-- buy-package.blade.php renders its card inside the app shell (sidebar + topbar). -->
   <DashboardLayout>
-    <AuthCardLayout :show-back-link="false">
+    <AuthCardLayout embedded :show-back-link="false">
       <FlashAlert type="danger" :message="loadError" @close="loadError = ''" />
       <form method="POST" @submit.prevent="submit">
         <div class="form-group">
           <label for="package">Choose your package</label>
-          <select v-model="selectedPackage" name="package" class="form-control" required>
+          <select id="package" v-model="selectedPackage" name="package" class="form-control" :disabled="loading || submitting" required>
             <option value="">Select Package</option>
-            <option v-for="pack in packages" :key="pack.id" :value="pack.id">{{ pack.name }} USD</option>
+            <option v-for="pack in visiblePackages" :key="pack.id" :value="pack.id">{{ pack.name }} — {{ pack.price }} USDT</option>
           </select>
         </div>
-        <button type="submit" class="btn btn-primary mt-4" :disabled="submitting || loading">Next</button>
+        <template v-if="blockchainEnabled">
+          <label class="mt-2"><input v-model="showLowerPackages" type="checkbox" :disabled="loading || submitting" /> Show lower / test packages</label>
+          <p class="mt-3">Top-ups extend your income cap only. You receive no new SIGNET allocation, bonus or vesting.</p>
+          <p v-if="selected && selected.commercial_terms">Package: {{ selected.price }} USDT. Service fee: {{ selected.commercial_terms.service_fee_usdt }} USDT. Required deposit: {{ selected.commercial_terms.required_usdt }} USDT.</p>
+          <p v-if="!topupEnabled">Automatic top-ups are not enabled yet.</p>
+        </template>
+        <button type="submit" class="btn btn-primary mt-4" :disabled="submitting || loading || (blockchainEnabled && !topupEnabled)">Next</button>
       </form>
       <div class="form-group"></div>
     </AuthCardLayout>
