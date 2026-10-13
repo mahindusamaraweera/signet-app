@@ -1,8 +1,8 @@
 <script setup>
 // Ports admin/dashboard.blade.php (route('admin.dashboard')). Differs from the
-// agent/user views in layout: My Token and My Wallet are half-width on small
-// screens, My Wallet appears twice (the second full-width copy without the
-// USDT suffix — a copy-paste artifact in the original, kept), the mining
+// agent/user views in layout: My Token and the 4× Income Cap card are
+// half-width on small screens (the original's duplicate My Wallet tile is
+// dropped), the mining
 // card closes the first `.row`, the activations table sits in its own
 // `.row.mt-4`, and an empty "Mining Dashboard" container trails the page.
 // Its activation alerts use fixed text. See dashboard_handler.go's
@@ -10,6 +10,7 @@
 import { computed } from 'vue'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
 import DashboardStatCard from '@/components/widgets/DashboardStatCard.vue'
+import IncomeCapCard from '@/components/widgets/IncomeCapCard.vue'
 import RankWidget from '@/components/widgets/RankWidget.vue'
 import RocWidget from '@/components/widgets/RocWidget.vue'
 import MiningWidget from '@/components/widgets/MiningWidget.vue'
@@ -27,7 +28,6 @@ const { authStore, resp, loadError, onVacation, urlDisplay, fetchDashboard, togg
 useSignetDashboard(resp)
 
 const user = computed(() => authStore.user)
-const myWallet = computed(() => Number(resp.value?.total_value || 0) - Number(resp.value?.wallet_balance || 0))
 </script>
 
 <template>
@@ -69,8 +69,7 @@ const myWallet = computed(() => Number(resp.value?.total_value || 0) - Number(re
       </div>
 
       <DashboardStatCard col-class="col-12 col-sm-6 col-xl-4 mb-4" primary label="My Token" :value="resp.my_tokens" usdt />
-      <DashboardStatCard col-class="col-12 col-sm-6 col-xl-4 mb-4" label="My Wallet" :value="myWallet" usdt />
-      <DashboardStatCard label="My Wallet" :value="myWallet" />
+      <IncomeCapCard col-class="col-12 col-sm-6 col-xl-4 mb-4" :earned="resp.wallet_balance ?? 0" :cap="resp.total_value ?? 0" />
       <DashboardStatCard v-if="resp.my_globle_director_share" label="My Global Director Share Wallet" :value="resp.my_globle_director_share.balance ?? 0" />
       <DashboardStatCard label="My Earn" :value="resp.wallet_balance ?? 0" usdt />
       <DashboardStatCard label="This Time Direct Share Pool value" :value="resp.pool_amount ?? 0" usdt />

@@ -8,6 +8,7 @@
 import { computed } from 'vue'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
 import DashboardStatCard from '@/components/widgets/DashboardStatCard.vue'
+import IncomeCapCard from '@/components/widgets/IncomeCapCard.vue'
 import RankWidget from '@/components/widgets/RankWidget.vue'
 import RocWidget from '@/components/widgets/RocWidget.vue'
 import MiningWidget from '@/components/widgets/MiningWidget.vue'
@@ -22,7 +23,6 @@ const { authStore, resp, loadError, urlDisplay, fetchDashboard, copyLink, needTo
 useSignetDashboard(resp)
 
 const user = computed(() => authStore.user)
-const myWallet = computed(() => Number(resp.value?.total_value || 0) - Number(resp.value?.wallet_balance || 0))
 </script>
 
 <template>
@@ -55,7 +55,7 @@ const myWallet = computed(() => Number(resp.value?.total_value || 0) - Number(re
       </div>
 
       <DashboardStatCard primary label="My Token" :value="resp.my_tokens ?? 0" usdt />
-      <DashboardStatCard label="My Wallet" :value="myWallet" usdt />
+      <IncomeCapCard :earned="resp.wallet_balance ?? 0" :cap="resp.total_value ?? 0" />
       <DashboardStatCard v-if="resp.my_globle_director_share" label="My Global Director Share Wallet" :value="resp.my_globle_director_share.balance ?? 0" />
       <DashboardStatCard label="My Earn" :value="resp.wallet_balance ?? 0" usdt />
       <DashboardStatCard label="This Time Direct Share Pool value" :value="resp.pool_amount ?? 0" usdt />
