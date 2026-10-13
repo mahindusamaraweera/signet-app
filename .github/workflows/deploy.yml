@@ -13,7 +13,7 @@ name: Deploy
 on:
   pull_request:
     types: [closed]
-    branches: [main]
+    branches: [main, dev, staging]
   workflow_dispatch:
 
 permissions:
