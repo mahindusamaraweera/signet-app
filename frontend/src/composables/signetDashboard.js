@@ -56,10 +56,12 @@ export function initSignetDashboard() {
     earn: SVG_OPEN + '<path d="M3.5 19.5h17"/><path d="M4 16.5l5-5 3.5 3.5L20 7.5"/><path d="M15 7.5h5v5"/></svg>',
     pool: SVG_OPEN + '<path d="M12 3.5c3.6 4.2 6 7 6 10a6 6 0 0 1-12 0c0-3 2.4-5.8 6-10z" fill="currentColor" fill-opacity=".16"/><path d="M9.3 14.2a2.7 2.7 0 0 0 2.7 2.6"/></svg>',
     share: SVG_OPEN + '<path d="M12 3.5v8.5h8.5" fill="currentColor" fill-opacity=".16"/><path d="M20.3 15.2A8.5 8.5 0 1 1 8.8 3.9"/></svg>',
-    portion: SVG_OPEN + '<circle cx="7.5" cy="7.5" r="2.6" fill="currentColor" fill-opacity=".16"/><circle cx="16.5" cy="16.5" r="2.6" fill="currentColor" fill-opacity=".16"/><path d="M18.5 5.5l-13 13"/></svg>'
+    portion: SVG_OPEN + '<circle cx="7.5" cy="7.5" r="2.6" fill="currentColor" fill-opacity=".16"/><circle cx="16.5" cy="16.5" r="2.6" fill="currentColor" fill-opacity=".16"/><path d="M18.5 5.5l-13 13"/></svg>',
+    income: SVG_OPEN + '<path d="M4 17a8 8 0 0 1 16 0" fill="currentColor" fill-opacity=".14"/><path d="M12 17l4-5"/><circle cx="12" cy="17" r="1.3" fill="currentColor"/><path d="M3.5 20.5h17"/></svg>'
   };
   function statKind(label) {
     label = (label || '').toLowerCase();
+    if (label.indexOf('income limit') > -1) return 'income';
     if (label.indexOf('global director') > -1) return 'director';
     if (label.indexOf('wallet') > -1) return 'wallet';
     if (label.indexOf('my token') > -1) return 'token';
