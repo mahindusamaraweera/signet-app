@@ -73,7 +73,13 @@ const items = computed(() => {
       { to: '/new-activations', label: 'Waiting Activations', icon: GRID_BROKEN, wrap: true, badge: true },
     )
   }
-  if (r !== 'company') list.push({ to: '/my-geneology', label: 'Geneology', icon: GRID, wrap: true })
+  if (r !== 'company') list.push({ to: '/my-geneology', label: 'Genealogy', icon: GRID, wrap: true })
+  list.push({ to: '/wallet/deposits', label: 'Deposit Wallet', icon: GRID, wrap: true })
+  list.push({ to: '/wallet/security', label: 'Withdrawal Security', icon: GRID, wrap: true })
+  list.push({ to: '/wallet/withdraw', label: 'Withdraw SIGNET', icon: GRID, wrap: true })
+	list.push({ to: '/wallet/vesting', label: 'SIGNET Vesting', icon: GRID, wrap: true })
+  list.push({ to: '/wallet/tier-link', label: 'Connect Tier Account', icon: GRID, wrap: true })
+	if (r === 'company' || r === 'admin') list.push({ to: '/admin/vesting', label: 'Manage Vesting', icon: GRID, wrap: true })
   list.push({ to: r !== 'company' ? '/kyc/show' : '/kyc', label: 'KYC', icon: GRID, wrap: true })
   return list
 })
@@ -130,7 +136,7 @@ watch(() => route.fullPath, closeSidebar)
 
   <nav id="sidebarMenu" class="sidebar d-lg-block bg-gray-800 text-white collapse">
     <div class="sidebar-inner px-4 pt-3">
-      <button id="sidebarMobileClose" type="button" class="sidebar-mobile-close d-lg-none" @click="closeSidebar">
+      <button id="sidebarMobileClose" type="button" class="sidebar-mobile-close d-lg-none" aria-label="Close navigation" @click="closeSidebar">
         &times;
       </button>
       <ul class="nav flex-column pt-3 pt-md-0">

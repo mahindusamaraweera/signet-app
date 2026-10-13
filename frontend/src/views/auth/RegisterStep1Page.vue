@@ -7,6 +7,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Swal from 'sweetalert2'
 import api from '@/api/client'
 import FlashAlert from '@/components/shared/FlashAlert.vue'
+import RegistrationProgress from '@/components/RegistrationProgress.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,6 +19,7 @@ const leaders = ref([])
 const submitting = ref(false)
 const errors = ref({})
 const formError = ref('')
+const blockchainEnabled = ref(false)
 
 const form = reactive({
   referral_code: '',
@@ -259,7 +261,12 @@ onMounted(async () => {
   form.referral_code = route.query.ref || ''
   try {
     const { data } = await api.get('/register/referral', { params: { ref: form.referral_code } })
-    if (data.status === 'success') {
+    if (data.status === 'verification_required') {
+      form.password = ''
+      form.password_confirmation = ''
+      await Swal.fire({ icon: 'info', title: 'Verify your email', text: data.message || 'Check your inbox for the verification link. Your account is created only after verification.' })
+    } else if (data.status === 'success') {
+      blockchainEnabled.value = !!data.blockchain_enabled
       countries.value = data.countries || []
       leaders.value = data.leaders || []
     } else {
@@ -290,7 +297,13 @@ async function onSubmit() {
   submitting.value = true
   try {
     const { data } = await api.post('/register/step1', { ...form })
-    if (data.status === 'success') {
+    if (data.status === 'verification_required') {
+      const referral = form.referral_code
+      // Do not retain submitted personal data, passwords or pending IDs in
+      // history/storage. Only the public referral code is kept for restarting.
+      for (const field of Object.keys(form)) form[field] = ''
+      await router.replace({ name: 'register.check-email', query: referral ? { ref: referral } : {} })
+    } else if (data.status === 'success') {
       router.push({ name: 'register.step2', params: { id: data.user_id } })
     } else {
       formError.value = data.message || 'Something went wrong. Please try again.'
@@ -309,7 +322,7 @@ async function onSubmit() {
 
 <template>
   <main>
-    <section class="min-vh-100 py-5 d-flex align-items-center" style="background: linear-gradient(180deg, #f7f9fc 0%, #eef1f8 100%)">
+    <section class="min-vh-100 py-5 d-flex align-items-center">
       <div class="container">
         <div class="row justify-content-center">
           <div class="col-12 col-lg-8 col-xl-7">
@@ -331,15 +344,9 @@ async function onSubmit() {
 
             <div v-else class="card border-0 shadow-lg rounded-4 overflow-hidden">
               <div class="px-4 px-md-5 pt-4 pt-md-5">
-                <div class="d-flex align-items-center justify-content-between mb-2">
-                  <span class="badge rounded-pill text-bg-primary bg-opacity-10 text-primary fw-semibold px-3 py-2">Step 1 of 2</span>
-                  <span class="text-muted small">Account details</span>
-                </div>
+                <RegistrationProgress :step="1" />
                 <h1 class="h3 fw-bold mb-1">Create your account</h1>
-                <p class="text-muted mb-4">Fill in your details below to get started.</p>
-                <div class="progress mb-4" style="height: 6px; border-radius: 999px">
-                  <div class="progress-bar bg-primary" role="progressbar" style="width: 50%; border-radius: 999px"></div>
-                </div>
+                <p class="text-muted mb-4">Account details → verify email → select package → fund your wallet.</p>
               </div>
 
               <form method="POST" class="px-4 px-md-5 pb-4 pb-md-5" @submit.prevent="onSubmit">
@@ -419,7 +426,7 @@ async function onSubmit() {
                 <div class="mb-4">
                   <h2 class="h6 fw-bold text-uppercase text-muted mb-3" style="letter-spacing: .05em; font-size: .75rem">Payment &amp; security</h2>
                   <div class="row g-3">
-                    <div class="col-12">
+                    <div v-if="!blockchainEnabled" class="col-12">
                       <label for="binance_pay_id" class="form-label small fw-semibold">Binance Pay ID</label>
                       <input id="binance_pay_id" v-model="form.binance_pay_id" type="text" class="form-control" :class="{ 'is-invalid': errors.binance_pay_id }" required />
                       <div v-if="errors.binance_pay_id" class="invalid-feedback">{{ errors.binance_pay_id[0] }}</div>
@@ -437,7 +444,7 @@ async function onSubmit() {
                 </div>
 
                 <button type="submit" class="btn btn-primary btn-lg w-100 rounded-3 fw-semibold py-3" :disabled="submitting">
-                  Continue to Step 2
+                  {{ submitting ? 'Submitting…' : 'Send verification email' }}
                 </button>
               </form>
             </div>

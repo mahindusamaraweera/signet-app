@@ -13,7 +13,7 @@
 //    (without redrawing — the next local tick does that).
 // The card is only redrawn from updateUI(), so what's on screen can lag the
 // in-memory numbers exactly as it does in the original.
-import { reactive, onMounted, onBeforeUnmount } from 'vue'
+import { reactive, ref, onMounted, onBeforeUnmount } from 'vue'
 import Swal from 'sweetalert2'
 import api from '@/api/client'
 
@@ -42,6 +42,8 @@ const ui = reactive({
 })
 
 const miningData = { mining_token: 0, total_token: 0, daily_mining: 0, status: 'inactive' }
+const loading = ref(false)
+let stopped = false
 let localUpdateInterval = null
 let serverSyncInterval = null
 
@@ -55,13 +57,16 @@ async function fetchMining() {
 }
 
 async function loadData() {
+  if (stopped || loading.value) return
   if (!props.userId) {
     debugLog('Error: No user ID')
     return
   }
+  loading.value = true
   debugLog('Loading mining data for user ' + props.userId)
   try {
     const result = await fetchMining()
+    if (stopped) return
     debugLog('User data response', result)
     if (result.success && result.data) {
       if (!result.data.total_token || !result.data.daily_mining) {
@@ -80,9 +85,15 @@ async function loadData() {
       throw new Error(result.error || 'No mining data found for this user')
     }
   } catch (error) {
+    if (stopped) return
     console.error('Error loading data:', error)
     debugLog('Error: ' + error.message)
     ui.connection = 'disconnected'
+    ui.status = 'Unavailable'
+    ui.statusClass = 'badge bg-warning'
+    ui.miningToken = ui.totalToken = ui.dailyMining = ui.miningRate = ui.progressPercent = '—'
+  } finally {
+    if (!stopped) loading.value = false
   }
 }
 
@@ -128,6 +139,7 @@ function startServerSync() {
   serverSyncInterval = setInterval(async () => {
     try {
       const result = await fetchMining()
+      if (stopped) return
       if (result.success && result.data) {
         miningData.mining_token = parseFloat(result.data.mining_token)
         miningData.status = result.data.status
@@ -137,6 +149,7 @@ function startServerSync() {
         throw new Error('Sync failed')
       }
     } catch (error) {
+      if (stopped) return
       console.error('Server sync error:', error)
       ui.connection = 'disconnected'
       debugLog('Sync error: ' + error.message)
@@ -155,6 +168,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopped = true
   if (localUpdateInterval) clearInterval(localUpdateInterval)
   if (serverSyncInterval) clearInterval(serverSyncInterval)
 })
@@ -178,6 +192,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="card-body">
+        <p v-if="ui.connection === 'disconnected'" class="alert alert-warning small" role="status">Mining data is temporarily unavailable. Any previous values below are the last loaded estimate, not a confirmed wallet balance. <button type="button" class="btn btn-sm btn-outline-primary ms-2" :disabled="loading" @click="loadData">{{ loading ? 'Retrying…' : 'Retry loading' }}</button></p>
         <!-- Mining Stats -->
         <div class="row text-center mb-4">
           <div class="col-md-3">

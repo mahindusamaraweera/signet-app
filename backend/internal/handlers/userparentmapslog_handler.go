@@ -113,6 +113,10 @@ func userParentLogsIndexHandler(d *app.Deps) http.HandlerFunc {
 // rolling back (via defer) on any error return.
 func userParentLogsDestroyHandler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if d.Cfg.RegistrationExpiryEnabled || d.Cfg.BlockchainEnabled {
+			httpx.Error(w, http.StatusConflict, "Manual account deletion is disabled; automatic expiry applies only to newly registered, unpaid accounts with financial clearance")
+			return
+		}
 		const genericErr = "Something went wrong while deleting records. No changes were saved."
 
 		logID, ok := parseUintParam(chi.URLParam(r, "log"))

@@ -9,12 +9,20 @@
 // expects: one .content element offset from the fixed .sidebar).
 import Sidebar from './Sidebar.vue'
 import Topbar from './Topbar.vue'
+import IncomeCapAlert from './IncomeCapAlert.vue'
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+import WalletNavigation from './WalletNavigation.vue'
+const route = useRoute()
+const walletPage = computed(() => route.path.startsWith('/wallet/') || route.path === '/admin/vesting')
 </script>
 
 <template>
   <Sidebar />
-  <main class="content">
+  <main id="main-content" class="content" :class="{ 'wallet-workspace': walletPage }">
     <Topbar />
+    <IncomeCapAlert />
+    <WalletNavigation v-if="walletPage" />
     <slot />
   </main>
 </template>

@@ -34,7 +34,7 @@ onMounted(() => {
 <template>
   <!-- buy-package-done.blade.php renders its card inside the app shell (sidebar + topbar). -->
   <DashboardLayout>
-    <AuthCardLayout :show-back-link="false">
+    <AuthCardLayout embedded :show-back-link="false">
       <div class="mt-4">
         <h3>Upliner Activation</h3>
         Binance ID: {{ nullStr(parentData?.binance_pay_id) }}

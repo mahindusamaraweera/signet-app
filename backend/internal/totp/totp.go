@@ -10,6 +10,7 @@ import (
 	"crypto/sha1"
 	"encoding/base32"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -25,7 +26,10 @@ func GenerateSecret() string {
 // OtpauthURL builds the otpauth://totp/... URI the QR code encodes, matching
 // the original's `signetint:{email}?secret={secret}&issuer=signetint` shape.
 func OtpauthURL(issuer, account, secret string) string {
-	return fmt.Sprintf("otpauth://totp/%s:%s?secret=%s&issuer=%s", issuer, account, secret, issuer)
+	label := issuer + ":" + account
+	query := url.Values{"secret": {secret}, "issuer": {issuer}}
+	uri := url.URL{Scheme: "otpauth", Host: "totp", Path: "/" + label, RawPath: "/" + url.PathEscape(label), RawQuery: query.Encode()}
+	return uri.String()
 }
 
 func code(secret string, counter int64) (string, error) {
@@ -50,16 +54,32 @@ func code(secret string, counter int64) (string, error) {
 // (30s) of clock drift — the standard tolerance most TOTP apps/libraries
 // (including sonata's) use by default.
 func CheckCode(secret, submitted string) bool {
+	_, ok := MatchingStep(secret, submitted, time.Now(), -1)
+	return ok
+}
+
+// MatchingStep returns the accepted counter for durable replay protection.
+// Callers must atomically persist it with their authorization and reject
+// counters at or below lastUsed; this function alone does not consume a code.
+func MatchingStep(secret, submitted string, at time.Time, lastUsed int64) (int64, bool) {
 	submitted = strings.TrimSpace(submitted)
-	if submitted == "" {
-		return false
+	if len(submitted) != 6 || secret == "" || at.Unix() < 0 {
+		return 0, false
 	}
-	now := time.Now().Unix() / 30
-	for _, step := range []int64{now - 1, now, now + 1} {
-		expected, err := code(secret, step)
-		if err == nil && expected == submitted {
-			return true
+	for _, digit := range submitted {
+		if digit < '0' || digit > '9' {
+			return 0, false
 		}
 	}
-	return false
+	now := at.Unix() / 30
+	for _, step := range []int64{now + 1, now, now - 1} {
+		if step < 0 || step <= lastUsed {
+			continue
+		}
+		expected, err := code(secret, step)
+		if err == nil && hmac.Equal([]byte(expected), []byte(submitted)) {
+			return step, true
+		}
+	}
+	return 0, false
 }

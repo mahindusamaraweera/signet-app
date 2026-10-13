@@ -12,6 +12,7 @@
 // Three register views link "Back to log in" to a broken relative
 // "./sign-in.html"; that link goes to /login here instead.
 defineProps({
+  embedded: { type: Boolean, default: false },
   showBackLink: { type: Boolean, default: true },
   backText: { type: String, default: 'Back to Homepage' },
   backTo: { type: String, default: '/' },
@@ -22,8 +23,8 @@ defineProps({
 </script>
 
 <template>
-  <main>
-    <section class="vh-lg-100 mt-5 mt-lg-0 bg-soft d-flex align-items-center">
+  <component :is="embedded ? 'div' : 'main'" :class="{ 'embedded-auth-card': embedded }">
+    <section class="auth-layout-shell bg-soft d-flex align-items-center">
       <div class="container">
         <p v-if="showBackLink && backPlacement === 'container'" class="text-center">
           <RouterLink :to="backTo" class="d-flex align-items-center justify-content-center">
@@ -46,10 +47,11 @@ defineProps({
         </div>
       </div>
     </section>
-  </main>
+  </component>
 </template>
 
 <style scoped>
+.auth-layout-shell { min-height:100vh;min-height:100svh;height:auto;padding:32px 0; }
 /* volt.js's data-background-lg: the illustration is only applied when the
    viewport is wider than the lg breakpoint. */
 @media (min-width: 992px) {

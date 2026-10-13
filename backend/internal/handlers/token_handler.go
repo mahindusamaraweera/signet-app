@@ -194,6 +194,17 @@ func activePackageHandler(d *app.Deps) http.HandlerFunc {
 			return
 		}
 		defer tx.Rollback()
+		if d.Cfg.BlockchainEnabled {
+			var intents int
+			if err := tx.Get(&intents, "SELECT COUNT(*) FROM package_purchase_intents WHERE user_package_id=?", body.PackageID); err != nil {
+				httpx.Error(w, 500, "Database error")
+				return
+			}
+			if intents > 0 {
+				httpx.Error(w, 409, "This package activates automatically after verified funding")
+				return
+			}
+		}
 
 		var pkg struct {
 			ID           uint64 `db:"id"`
@@ -321,7 +332,16 @@ var excludedPoolUserIDs = map[uint64]bool{2: true, 3: true, 4: true, 5: true}
 
 var errNoUserParent = errors.New("user-parent relationship not found")
 
-func processPackageActivation(tx *sqlx.Tx, pkg *activatingPackage, actingUserID uint64, needTokens, feePercentage int64) error {
+func processPackageActivation(tx *sqlx.Tx, pkg *activatingPackage, actingUserID uint64, needTokens, feePercentage int64, contexts ...activationCommissionContext) error {
+	credit := func(userID uint64, amount float64, description, kind string) error {
+		if len(contexts) > 0 {
+			return creditActivationCommissionTx(tx, userID, amount, description, kind, contexts[0])
+		}
+		if err := wallet.EnsureNoPendingCommissions(tx, userID); err != nil {
+			return err
+		}
+		return creditWalletTx(tx, userID, amount, description)
+	}
 	var findUser struct {
 		ID        uint64 `db:"id"`
 		VirtualID uint64 `db:"virtual_id"`
@@ -366,11 +386,13 @@ func processPackageActivation(tx *sqlx.Tx, pkg *activatingPackage, actingUserID 
 			}
 			err := tx.Get(&discount, "SELECT current_user_id FROM super_parent_logs WHERE user_package = ? LIMIT 1", oldPackageID.Int64)
 			if err == nil {
-				if err := creditWalletTx(tx, discount.CurrentUserID, float64(pkg.PackagePrice)*(20.0/100), ""); err != nil {
+				if err := credit(discount.CurrentUserID, float64(pkg.PackagePrice)*(20.0/100), "", "spillover"); err != nil {
 					return err
 				}
-				if err := tokenTransferTx(tx, 1, discount.CurrentUserID, int64(float64(pkg.PackagePrice)*0.20)); err != nil {
-					return err
+				if len(contexts) == 0 {
+					if err := tokenTransferTx(tx, 1, discount.CurrentUserID, int64(float64(pkg.PackagePrice)*0.20)); err != nil {
+						return err
+					}
 				}
 			} else if err != sql.ErrNoRows {
 				return err
@@ -379,15 +401,18 @@ func processPackageActivation(tx *sqlx.Tx, pkg *activatingPackage, actingUserID 
 	}
 
 	if findUser.Node == "gratitude" {
-		if err := tokenTransferTx(tx, 1, findUser.VirtualID, int64(float64(pkg.PackagePrice)*0.20)); err != nil {
-			return err
+		if len(contexts) == 0 {
+			if err := tokenTransferTx(tx, 1, findUser.VirtualID, int64(float64(pkg.PackagePrice)*0.20)); err != nil {
+				return err
+			}
 		}
-		if err := creditWalletTx(tx, findUser.VirtualID, float64(pkg.PackagePrice)*(20.0/100), ""); err != nil {
+		if err := credit(findUser.VirtualID, float64(pkg.PackagePrice)*(20.0/100), "", "gratitude"); err != nil {
 			return err
 		}
 	}
 
-	if err := creditWalletTx(tx, actingUserID, float64(pkg.PackagePrice)*(float64(feePercentage)/100), ""); err != nil {
+	directCommission := float64(pkg.PackagePrice) * (float64(feePercentage) / 100)
+	if err := credit(actingUserID, directCommission, "", "direct_team"); err != nil {
 		return err
 	}
 
@@ -406,14 +431,14 @@ func processPackageActivation(tx *sqlx.Tx, pkg *activatingPackage, actingUserID 
 	// PHP's !empty() also treats "0" as empty — never credit user 0.
 	if owner.LeaderCode.Valid && owner.LeaderCode.String != "" {
 		if leaderID, ok := parseUintParam(owner.LeaderCode.String); ok && leaderID != 0 {
-			if err := creditWalletTx(tx, leaderID, float64(pkg.PackagePrice)*(5.0/100), "Leadership Bonus"); err != nil {
+			if err := credit(leaderID, float64(pkg.PackagePrice)*(5.0/100), "Leadership Bonus", "leadership"); err != nil {
 				return err
 			}
 		}
 	}
 	if owner.ExecutiveCode.Valid && owner.ExecutiveCode.String != "" {
 		if execID, ok := parseUintParam(owner.ExecutiveCode.String); ok && execID != 0 {
-			if err := creditWalletTx(tx, execID, float64(pkg.PackagePrice)*(5.0/100), "Leadership Bonus"); err != nil {
+			if err := credit(execID, float64(pkg.PackagePrice)*(5.0/100), "Leadership Bonus", "executive"); err != nil {
 				return err
 			}
 		}
@@ -458,7 +483,7 @@ func processPackageActivationCompany(tx *sqlx.Tx, pkg *activatingPackage) error 
 // duplication (TokenController::updateWallet is a separate implementation
 // from WalletService::creditWallet), so keeping a transaction-scoped copy
 // here is faithful, not just a Go plumbing convenience.
-func creditWalletTx(tx *sqlx.Tx, userID uint64, amount float64, description string) error {
+func creditWalletTx(tx *sqlx.Tx, userID uint64, amount float64, description string, recorders ...commissionRecorder) error {
 	var walletID models.NullInt64
 	err := tx.Get(&walletID, "SELECT id FROM wallets WHERE user_id = ?", userID)
 	switch {
@@ -473,9 +498,21 @@ func creditWalletTx(tx *sqlx.Tx, userID uint64, amount float64, description stri
 			return err
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO earn_logs (user_id, amount, description, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())`,
-		itoaU(userID), ftoaF(amount), description); err != nil {
+	logResult, err := tx.Exec(`INSERT INTO earn_logs (user_id, amount, description, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())`,
+		itoaU(userID), ftoaF(amount), description)
+	if err != nil {
 		return err
+	}
+	if len(recorders) > 0 {
+		logID, err := logResult.LastInsertId()
+		if err != nil {
+			return err
+		}
+		for _, record := range recorders {
+			if err := record(tx, logID, userID, ftoaF(amount), description); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Global Share Wallet credit — same bootstrap+cap logic as wallet.go.
@@ -549,8 +586,22 @@ func creditWalletTx(tx *sqlx.Tx, userID uint64, amount float64, description stri
 	}
 	// TokenController::updateWallet logs the description on the company row
 	// too (WalletService's version doesn't).
-	_, err = tx.Exec(`INSERT INTO earn_logs (user_id, amount, description, created_at, updated_at) VALUES ('1', ?, ?, NOW(), NOW())`, ftoaF(amount), description)
-	return err
+	companyLog, err := tx.Exec(`INSERT INTO earn_logs (user_id, amount, description, created_at, updated_at) VALUES ('1', ?, ?, NOW(), NOW())`, ftoaF(amount), description)
+	if err != nil {
+		return err
+	}
+	if len(recorders) > 0 {
+		logID, err := companyLog.LastInsertId()
+		if err != nil {
+			return err
+		}
+		for _, record := range recorders {
+			if err := record(tx, logID, 1, ftoaF(amount), description); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func tokenTransferTx(tx *sqlx.Tx, fromUserID, toUserID uint64, amount int64) error {

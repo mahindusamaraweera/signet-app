@@ -18,7 +18,7 @@ const auth = useAuthStore()
         <!-- Navbar links -->
         <ul class="navbar-nav align-items-center">
           <li class="nav-item dropdown ms-lg-3">
-            <a class="nav-link dropdown-toggle pt-1 px-0" href="/" role="button" data-bs-toggle="dropdown" aria-expanded="false" @click.prevent>
+            <a class="nav-link dropdown-toggle pt-1 px-0" href="/" role="button" data-bs-toggle="dropdown" aria-expanded="false" :aria-label="`Account menu for ${auth.user?.name || 'your account'}`" @click.prevent>
               <div class="media d-flex align-items-center">
                 <div class="media-body ms-2 text-dark align-items-center d-none d-lg-block">
                   <span class="mb-0 font-small fw-bold text-gray-900">{{ auth.user?.name }}</span>
