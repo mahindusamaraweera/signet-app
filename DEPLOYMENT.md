@@ -189,6 +189,27 @@ matching on-chain receipt is confirmed. This change needs no new migration;
 refresh custody config cache and restart the correct Horizon/queue service.
 Deploy the frontend to show waiting, recovery-pending and recovered states.
 
+### Live commission price credential
+
+Custody requests `/pancakeswap/price` using the signer's separate read-only
+credential. Set `SIGNER_PRICE_API_KEY` to the same long random secret in both
+Laravel's runtime environment and the Node wallet signer's runtime environment.
+Keep it separate from `SIGNER_API_KEY`; never use a manual token price to bypass
+live commission pricing. A missing Node credential returns
+`price_api_not_configured`; a mismatched credential returns `unauthorized`.
+Deploy the custody price-header fix, refresh Laravel configuration with
+`php artisan config:cache`, restart the actual Node signer process, and run
+`php artisan horizon:terminate` so Supervisor starts workers with new config.
+Verify read-only pricing with:
+
+```bash
+php artisan tinker --execute='dump(app(\App\Services\Blockchain\SignerClient::class)->pancakeSwapPrice("SIGNET", "USDT"));'
+```
+
+Existing commission outbox rows retry automatically; preserve their identities.
+A signer circuit breaker may take its configured open interval to close.
+The company sale waits for confirmed commission delivery.
+
 ### Commission remainder paid to company
 
 Keep the existing commission percentages; there is no fixed 60/40 split.
