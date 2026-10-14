@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/jmoiron/sqlx"
 	"log"
 	"signet-backend/internal/app"
 	"signet-backend/internal/blockchain"
@@ -69,9 +70,26 @@ func syncCompanySettlement(d *app.Deps, id uint64) error {
 	if err = tx.Select(&rows, `SELECT id,earn_log_id,purchase_intent_id,beneficiary_user_id,commission_kind,commission_usd,status FROM blockchain_commission_outbox WHERE purchase_intent_id=? ORDER BY id`, id); err != nil {
 		return err
 	}
+	for _, row := range rows {
+		if row.Status == "requires_reconciliation" && row.RecipientID == 1 {
+			if err := classifyLegacyCompanyAccounting(tx, id); err != nil {
+				return err
+			}
+			rows = nil
+			if err := tx.Select(&rows, `SELECT id,earn_log_id,purchase_intent_id,beneficiary_user_id,commission_kind,commission_usd,status FROM blockchain_commission_outbox WHERE purchase_intent_id=? ORDER BY id`, id); err != nil {
+				return err
+			}
+			break
+		}
+	}
 	commissions := make([]blockchain.CommissionInstruction, 0, len(rows))
 	for _, row := range rows {
 		switch row.Status {
+		case "accounting_only":
+			if row.RecipientID != 1 {
+				return fmt.Errorf("non-company commission marked accounting-only")
+			}
+			continue
 		case "awaiting_authorization", "authorized", "confirming", "confirmed":
 			row.BuyerID = intent.UserID
 			commissions = append(commissions, row.CommissionInstruction)
@@ -106,4 +124,29 @@ func syncCompanySettlement(d *app.Deps, id uint64) error {
 		return fmt.Errorf("company settlement identity changed")
 	}
 	return nil
+}
+
+// Reclassify only unsubmitted secondary company entries corroborated by a
+// confirmed non-company payout and both original earn logs. Financial credits,
+// payout amounts and transaction identities are never changed by this repair.
+func classifyLegacyCompanyAccounting(tx *sqlx.Tx, intentID uint64) error {
+	_, err := tx.Exec(`UPDATE blockchain_commission_outbox extra
+ JOIN earn_logs company_log ON company_log.id=extra.earn_log_id
+ JOIN blockchain_commission_outbox paid ON paid.purchase_intent_id=extra.purchase_intent_id
+  AND paid.commission_kind=extra.commission_kind AND paid.commission_usd=extra.commission_usd
+  AND paid.description=extra.description AND paid.beneficiary_user_id<>1
+ JOIN earn_logs paid_log ON paid_log.id=paid.earn_log_id
+ SET extra.status='accounting_only'
+ WHERE extra.purchase_intent_id=? AND extra.beneficiary_user_id=1
+  AND extra.status='requires_reconciliation' AND extra.commission_kind IN ('direct_team','gratitude','spillover','leadership','executive')
+  AND extra.description<>'Income cap commission diversion'
+  AND extra.remote_payment_id IS NULL AND extra.transfer_tx_hash IS NULL AND extra.signet_amount IS NULL
+  AND paid.status='confirmed' AND paid.transfer_tx_hash IS NOT NULL AND paid.transfer_tx_hash<>''
+  AND company_log.user_id='1' AND paid_log.user_id=CAST(paid.beneficiary_user_id AS CHAR)
+  AND company_log.id>paid_log.id AND company_log.created_at=paid_log.created_at
+  AND CAST(company_log.amount AS DECIMAL(36,18))=extra.commission_usd
+  AND CAST(paid_log.amount AS DECIMAL(36,18))=paid.commission_usd
+  AND COALESCE(company_log.description,'')=extra.description
+  AND COALESCE(paid_log.description,'')=paid.description`, intentID)
+	return err
 }

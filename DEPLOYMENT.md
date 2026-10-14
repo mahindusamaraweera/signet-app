@@ -288,6 +288,16 @@ commission list and signer identity. A disputed/unprepared commission blocks
 company settlement instead of assuming a smaller payout. Company settlement
 failure does not deactivate a funded first package or spend its locked tokens.
 
+Legacy secondary company accounting entries are not additional commission
+entitlements. New entries are recorded as `accounting_only`. For pending
+settlements, the worker can reclassify old unsubmitted `requires_reconciliation`
+company rows only when a matching confirmed non-company payout and original
+earn logs corroborate the role, USD amount, description and timestamp. Earn
+logs and wallet/cap balances are preserved. Accounting-only rows are excluded
+from the custody commission manifest; unmatched disputed rows remain blocked.
+Never mark every reconciliation row confirmed or delete payment history to
+unblock a sale. No new schema migration is required for this classification.
+
 Verify a new staging first purchase with nonzero remainder: compare the
 `blockchain_company_settlements` state (`pending`, `sealed`, `confirmed`),
 custody `policy.company_remainder_usd`, `settlement_signet`,
