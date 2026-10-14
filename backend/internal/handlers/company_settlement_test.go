@@ -16,11 +16,14 @@ import (
 )
 
 func TestCompanySettlementWaitsForEvidenceAndPreservesRetryIdentity(t *testing.T) {
-	for _, scenario := range []string{"unprepared", "sealed", "confirmed", "legacy", "network failure", "already confirmed"} {
+	for _, scenario := range []string{"unprepared", "sealed", "confirmed", "legacy", "network failure", "already confirmed", "previously skipped"} {
 		t.Run(scenario, func(t *testing.T) {
 			state := "pending"
 			if scenario == "already confirmed" {
 				state = "confirmed"
+			}
+			if scenario == "previously skipped" {
+				state = "skipped"
 			}
 			fixture := &commissionSQLFixture{steps: []commissionSQLStep{
 				{contains: "status='completed' AND purchase_kind='first' FOR UPDATE", columns: []string{"id", "user_id", "package_price", "purchase_kind"}, values: []driver.Value{int64(1), int64(42), "100", "first"}},
@@ -65,12 +68,15 @@ func TestCompanySettlementWaitsForEvidenceAndPreservesRetryIdentity(t *testing.T
 				json.NewEncoder(w).Encode(blockchain.CompanySettlementResult{Enabled: &enabled, Sealed: &sealed, Settled: &settled, Hash: hash, Buyer: "42", Purchase: "1"})
 			}))
 			defer server.Close()
-			if scenario == "sealed" || scenario == "confirmed" || scenario == "legacy" {
+			if scenario == "sealed" || scenario == "confirmed" || scenario == "legacy" || scenario == "previously skipped" {
 				expected := scenario
+				if scenario == "previously skipped" {
+					expected = "sealed"
+				}
 				if scenario == "legacy" {
 					expected = "skipped"
 				}
-				fixture.steps = append(fixture.steps, commissionSQLStep{contains: "AND status IN ('pending','sealed')", checkArgs: func(args []driver.NamedValue) error {
+				fixture.steps = append(fixture.steps, commissionSQLStep{contains: "AND status IN ('pending','sealed','skipped')", checkArgs: func(args []driver.NamedValue) error {
 					if args[0].Value != expected || args[2].Value != int64(1) {
 						return fmt.Errorf("changed settlement state or purchase identity")
 					}
