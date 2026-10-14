@@ -19,6 +19,7 @@ type commissionSQLStep struct {
 	contains  string
 	columns   []string
 	values    []driver.Value
+	rowValues [][]driver.Value
 	args      []driver.Value
 	insertID  int64
 	err       error
@@ -73,7 +74,7 @@ func (f *commissionSQLFixture) ExecContext(_ context.Context, query string, args
 }
 func (f *commissionSQLFixture) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	step, err := f.next(query, args)
-	return &commissionSQLRows{columns: step.columns, values: step.values}, err
+	return &commissionSQLRows{columns: step.columns, values: step.values, rowValues: step.rowValues}, err
 }
 
 type commissionSQLResult int64
@@ -82,14 +83,25 @@ func (r commissionSQLResult) LastInsertId() (int64, error) { return int64(r), ni
 func (r commissionSQLResult) RowsAffected() (int64, error) { return 1, nil }
 
 type commissionSQLRows struct {
-	columns []string
-	values  []driver.Value
-	read    bool
+	columns   []string
+	values    []driver.Value
+	rowValues [][]driver.Value
+	rowIndex  int
+	read      bool
 }
 
 func (r *commissionSQLRows) Columns() []string { return r.columns }
 func (r *commissionSQLRows) Close() error      { return nil }
 func (r *commissionSQLRows) Next(dest []driver.Value) error {
+	if r.rowValues != nil {
+		if r.rowIndex >= len(r.rowValues) {
+			return io.EOF
+		}
+		copy(dest, r.rowValues[r.rowIndex])
+		r.rowIndex++
+		return nil
+	}
+
 	if r.read {
 		return io.EOF
 	}
@@ -166,6 +178,7 @@ func TestCompanyOverflowCommissionGetsItsOwnEarnLogEvidence(t *testing.T) {
 		{contains: "INSERT INTO earn_logs", insertID: 18},
 		{contains: "INSERT INTO blockchain_commission_outbox", args: []driver.Value{int64(5), int64(18), int64(1), "50", "", "direct_team"}},
 		{contains: "UPDATE blockchain_commission_outbox SET status='requires_reconciliation'", args: []driver.Value{int64(18)}},
+		{contains: "UPDATE blockchain_commission_outbox SET status='accounting_only'", args: []driver.Value{int64(18)}},
 	}}
 	db := sqlx.NewDb(sql.OpenDB(fixture), "commission-fixture")
 	defer db.Close()
