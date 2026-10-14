@@ -212,21 +212,36 @@ The company sale waits for confirmed commission delivery.
 
 ### Commission remainder paid to company
 
-Keep the existing commission percentages; there is no fixed 60/40 split.
-For a new first purchase, custody waits for the sealed source commission list
-and all confirmed commission deliveries. It subtracts their allocated USD
-amounts from the package price (excluding service fee and purchaser bonus),
-converts that remainder at a fresh live SIGNET/USDT rate, then sells treasury
-SIGNET through PancakeSwap to `SIGNET_APP_TOPUP_COMPANY_USDT_ADDRESS`.
-The buyer's purchased SIGNET and bonus remain locked and untouched.
-Existing income-cap/company-diversion instructions still count as allocated
-commissions and retain their existing treatment; they are not paid a second time.
+Keep the existing commission percentages and source USD/cap accounting; there
+is no fixed 60/40 split. New custody orders snapshot
+`commission_basis=confirmed_swap_output_v1`. Each commission token entitlement
+is calculated as `commission_usd * confirmed_swap_signet / package_price_usdt`,
+rounded down to the token's base unit. Purchaser bonus and service fee are
+excluded. There is no fresh live token price lookup for these entitlements.
+For example, a $1,000 purchase with 10,000 confirmed swap SIGNET and $400 of
+system-calculated commission pays 4,000 SIGNET, regardless of later price changes.
+Actual commission percentages continue to come from Signet-app's rules.
 
-Top-ups retain their existing flow: the package-price swap sends SIGNET to
-treasury, commission deliveries consume those swap proceeds, and the actual
-remaining SIGNET is sold to the same company USDT destination. A top-up gives
-the buyer no new SIGNET allocation or bonus. Actual received USDT may differ
-from the nominal USD remainder due to execution fees, slippage and price changes.
+For a first purchase, custody waits for the sealed source commission list and
+all confirmed deliveries, then sells treasury SIGNET equal to the confirmed
+swap output minus allocated commission SIGNET. The buyer's purchased SIGNET
+and bonus remain locked and untouched. Existing income-cap/company-diversion
+instructions retain their treatment and count as allocated commission tokens;
+they are not paid a second time.
+
+For top-ups, the purchase swap sends SIGNET to treasury. Commission deliveries
+use the same purchase swap basis, and the remaining swap SIGNET is sold to
+`SIGNET_APP_TOPUP_COMPANY_USDT_ADDRESS`. The buyer receives no new token
+allocation, bonus or vesting. The reverse sale still uses a live PancakeSwap
+execution quote with slippage protection; actual company USDT can differ from
+the original nominal USD remainder.
+
+Existing orders without the new basis retain their previous policy and live
+conversion behavior. Existing authorized, confirming, confirmed or sealed
+financial instructions are never silently repriced. Do not edit old policies or
+reset payout identities to change a purchase already in progress. Reconcile
+any requested historical conversion separately. New swap-based entitlement
+quotes do not expire because their purchase evidence is immutable.
 
 Deploy custody first. Set these server flags (preserve existing credentials and
 approved destinations):
