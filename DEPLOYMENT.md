@@ -189,6 +189,72 @@ matching on-chain receipt is confirmed. This change needs no new migration;
 refresh custody config cache and restart the correct Horizon/queue service.
 Deploy the frontend to show waiting, recovery-pending and recovered states.
 
+### Commission remainder paid to company
+
+Keep the existing commission percentages; there is no fixed 60/40 split.
+For a new first purchase, custody waits for the sealed source commission list
+and all confirmed commission deliveries. It subtracts their allocated USD
+amounts from the package price (excluding service fee and purchaser bonus),
+converts that remainder at a fresh live SIGNET/USDT rate, then sells treasury
+SIGNET through PancakeSwap to `SIGNET_APP_TOPUP_COMPANY_USDT_ADDRESS`.
+The buyer's purchased SIGNET and bonus remain locked and untouched.
+Existing income-cap/company-diversion instructions still count as allocated
+commissions and retain their existing treatment; they are not paid a second time.
+
+Top-ups retain their existing flow: the package-price swap sends SIGNET to
+treasury, commission deliveries consume those swap proceeds, and the actual
+remaining SIGNET is sold to the same company USDT destination. A top-up gives
+the buyer no new SIGNET allocation or bonus. Actual received USDT may differ
+from the nominal USD remainder due to execution fees, slippage and price changes.
+
+Deploy custody first. Set these server flags (preserve existing credentials and
+approved destinations):
+
+```dotenv
+# signet-token
+SIGNET_APP_COMMISSION_PREPARATION_ENABLED=true
+SIGNET_APP_FIRST_COMMISSION_DELIVERY_ENABLED=true
+SIGNET_APP_FIRST_COMPANY_SETTLEMENT_ENABLED=true
+SIGNET_APP_TOPUP_ENABLED=true
+PANCAKESWAP_ENABLED=true
+# SIGNET_APP_TOPUP_COMPANY_USDT_ADDRESS must contain the approved company address.
+```
+
+Run `php artisan config:cache` and restart the correct Horizon service with
+`php artisan horizon:terminate` under Supervisor. Keep the signer and the
+`blockchain` queue running. No new Laravel migration is needed; existing
+settlement columns store the swap identity, amounts and confirmation.
+The opt-in is frozen when a new custody purchase is created. Older first
+purchases are skipped; changing configuration never retroactively sells for them.
+
+Then configure Signet-app:
+
+```dotenv
+ENABLE_SCHEDULER=true
+BLOCKCHAIN_ENABLED=true
+BLOCKCHAIN_TOPUP_ENABLED=true
+BLOCKCHAIN_COMMISSION_PREPARATION_ENABLED=true
+BLOCKCHAIN_COMMISSION_DELIVERY_ENABLED=true
+BLOCKCHAIN_COMPANY_SETTLEMENT_ENABLED=true
+```
+
+Apply migration `034_first_company_settlement.sql` from `backend/` with
+`go run ./cmd/migrate up`, rebuild/deploy the API, and restart the actual API
+service (`signet-staging.service` on the supplied staging host). The source
+worker rotates pending manifests every minute; retrying preserves the same
+commission list and signer identity. A disputed/unprepared commission blocks
+company settlement instead of assuming a smaller payout. Company settlement
+failure does not deactivate a funded first package or spend its locked tokens.
+
+Verify a new staging first purchase with nonzero remainder: compare the
+`blockchain_company_settlements` state (`pending`, `sealed`, `confirmed`),
+custody `policy.company_remainder_usd`, `settlement_signet`,
+`settlement_tx_hash`, `settlement_usdt`, and `settlement_confirmed_at`.
+The confirmed receipt must prove the treasury SIGNET debit and company USDT
+credit. Check that retrying sends no second swap and buyer locked balances
+remain unchanged. Test the top-up remainder flow separately. Never replace
+an ambiguous or reverted signer operation with a fresh purchase/key.
+
 ## 4. Frontend
 
 ### Build
