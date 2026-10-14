@@ -122,7 +122,7 @@ func RegisterBlockchainRoutes(r chi.Router, d *app.Deps) {
 		}
 		if result.Kind != "topup" && (result.Status == "awaiting_deposit" || result.Status == "expired") {
 			var placements int
-			if err := d.DB.Get(&placements, "SELECT COUNT(*) FROM user_parents WHERE user_id=? AND node IN ('deactive','active')", auth.UserFromContext(r.Context()).ID); err != nil {
+			if err := d.DB.Get(&placements, "SELECT COUNT(*) FROM user_parents WHERE user_id=? AND node IN ('deactive','active','gratitude','correct')", auth.UserFromContext(r.Context()).ID); err != nil {
 				log.Printf("blockchain/purchase: user %d: placement status failed: %v", auth.UserFromContext(r.Context()).ID, err)
 				httpx.Error(w, 503, "Placement status temporarily unavailable")
 				return

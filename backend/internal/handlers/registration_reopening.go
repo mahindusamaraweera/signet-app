@@ -60,7 +60,7 @@ func syncRegistrationReopening(d *app.Deps, intentID uint64) error {
 		return errors.New("replacement placement ownership mismatch")
 	}
 	var placementID uint64
-	if err := tx.Get(&placementID, "SELECT id FROM user_parents WHERE user_id=? AND node IN ('deactive','active') ORDER BY id LIMIT 1 FOR UPDATE", owner); err != nil {
+	if err := tx.Get(&placementID, "SELECT id FROM user_parents WHERE user_id=? AND node IN ('deactive','active','gratitude','correct') ORDER BY id LIMIT 1 FOR UPDATE", owner); err != nil {
 		return err
 	}
 	var expiredOwner uint64

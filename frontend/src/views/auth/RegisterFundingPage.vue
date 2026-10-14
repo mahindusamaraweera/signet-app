@@ -7,7 +7,7 @@ import AuthCardLayout from '@/components/layout/AuthCardLayout.vue'
 import QRCode from 'qrcode'
 import PartialDepositReminder from '@/components/PartialDepositReminder.vue'
 import { usdtDisplay, usdtDeficitDisplay } from '@/utils/usdtDisplay'
-import { activationAction } from '@/utils/purchaseActivation'
+import { activationAction, activationCheckMessage } from '@/utils/purchaseActivation'
 import RegistrationProgress from '@/components/RegistrationProgress.vue'
 
 const authStore = useAuthStore()
@@ -99,7 +99,7 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
       </dl>
       <div v-if="purchase.status === 'awaiting_deposit' && (purchase.last_sync_error || !purchase.last_attempt_at)" class="alert alert-warning" role="status">
         <strong>Waiting for automatic activation checks</strong>
-        <p class="mb-0 mt-1">{{ purchase.last_sync_error === 'placement_required' ? 'Your placement needs review before this purchase can proceed.' : purchase.last_sync_error ? 'The activation service could not complete its latest check. Your funds remain recorded. Contact support if this persists.' : 'The activation worker has not recorded its first check yet.' }}</p>
+        <p class="mb-0 mt-1">{{ activationCheckMessage(purchase) }}</p>
         <p class="small mt-2 mb-0">If your deposit is credited below, do not send another payment just because the package status has not updated.</p>
       </div>
       <div v-else-if="purchase.status === 'awaiting_deposit' && fundingReady" class="alert alert-info" role="status">
