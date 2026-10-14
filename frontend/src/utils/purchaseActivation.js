@@ -22,3 +22,11 @@ export function hasUSDTShortfall(value) {
   const amount = units(value)
   return amount !== null && amount > 0n
 }
+
+// A historical sync error is not evidence of a current placement problem.
+export function activationCheckMessage(purchase) {
+  if (purchase?.placement_required === true) return 'Your placement needs review before this purchase can proceed.'
+  if (purchase?.last_sync_error === 'placement_required' && purchase?.placement_required === false) return 'Your placement is available now. Retry activation below or wait for the next automatic check.'
+  if (purchase?.last_sync_error) return 'The last activation check could not complete. Your funds remain recorded. Retry activation below or contact support if this persists.'
+  return 'The activation worker has not recorded its first check yet.'
+}
