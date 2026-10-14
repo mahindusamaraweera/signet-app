@@ -7,6 +7,7 @@ package handlers
 import (
 	"database/sql"
 	"errors"
+	"github.com/jmoiron/sqlx"
 	"log"
 	"net/http"
 	"regexp"
@@ -490,47 +491,9 @@ func registerStep2SubmitHandler(d *app.Deps) http.HandlerFunc {
 		rootRowID, _ := res.LastInsertId()
 		createdIDs = append(createdIDs, uint64(rootRowID))
 
-		// Same-instant race correction (AuthController@processStep2): only
-		// when 2+ children of the referrer were created at this row's exact
-		// created_at — i.e. two sign-ups landed in the same second — keep
-		// the oldest as "gratitude" (copying the newest's placement), add a
-		// "correct" row, and delete the newest. The created_at filter is
-		// essential: without it every referral after a referrer's first one
-		// overwrote an unrelated older user's row and deleted the new one.
-		if referredBy != 0 {
-			var siblings []struct {
-				ID        uint64 `db:"id"`
-				UserID    uint64 `db:"user_id"`
-				VirtualID uint64 `db:"virtual_id"`
-				ParentID  uint64 `db:"parent_id"`
-			}
-			if err := tx.Select(&siblings, `SELECT id, user_id, virtual_id, parent_id FROM user_parents
-				WHERE virtual_id = ? AND created_at = (SELECT created_at FROM user_parents WHERE id = ?)
-				ORDER BY created_at ASC, id ASC FOR UPDATE`, referredBy, rootRowID); err != nil {
-				httpx.Error(w, http.StatusInternalServerError, "Could not place user in tree")
-				return
-			}
-			if len(siblings) >= 2 {
-				gratitudeRow := siblings[0]
-				activeRow := siblings[len(siblings)-1]
-				if _, err := tx.Exec(`UPDATE user_parents SET user_id=?, virtual_id=?, parent_id=?, updated_at=NOW() WHERE id=?`,
-					activeRow.UserID, activeRow.VirtualID, activeRow.ParentID, gratitudeRow.ID); err != nil {
-					httpx.Error(w, http.StatusInternalServerError, "Could not place user in tree")
-					return
-				}
-				res, err := tx.Exec(`INSERT INTO user_parents (user_id, virtual_id, parent_id, node, created_at, updated_at)
-					VALUES (?, ?, ?, 'correct', NOW(), NOW())`, activeRow.UserID, activeRow.ParentID, activeRow.ParentID)
-				if err != nil {
-					httpx.Error(w, http.StatusInternalServerError, "Could not place user in tree")
-					return
-				}
-				correctID, _ := res.LastInsertId()
-				createdIDs = append(createdIDs, uint64(correctID))
-				if _, err := tx.Exec("DELETE FROM user_parents WHERE id = ?", activeRow.ID); err != nil {
-					httpx.Error(w, http.StatusInternalServerError, "Could not place user in tree")
-					return
-				}
-			}
+		if err := correctLegacySignupPlacement(tx, d.Cfg.BlockchainEnabled, referredBy, rootRowID, &createdIDs); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "Could not place user in tree")
+			return
 		}
 
 		var findParent struct {
@@ -731,4 +694,46 @@ func passwordResetHandler(d *app.Deps) http.HandlerFunc {
 
 		httpx.OK(w, map[string]interface{}{"status": "success", "message": "Your password has been reset!"})
 	}
+}
+
+// Blockchain purchases bind placement and commission evidence to each user.
+// Never reuse another signup's row just because timestamps share one second.
+// Keep the legacy correction only for the legacy funding flow.
+func correctLegacySignupPlacement(tx *sqlx.Tx, blockchainEnabled bool, referredBy uint64, rootRowID int64, createdIDs *[]uint64) error {
+	if blockchainEnabled {
+		return nil
+	}
+	if referredBy != 0 {
+		var siblings []struct {
+			ID        uint64 `db:"id"`
+			UserID    uint64 `db:"user_id"`
+			VirtualID uint64 `db:"virtual_id"`
+			ParentID  uint64 `db:"parent_id"`
+		}
+		if err := tx.Select(&siblings, `SELECT id, user_id, virtual_id, parent_id FROM user_parents
+				WHERE virtual_id = ? AND created_at = (SELECT created_at FROM user_parents WHERE id = ?)
+				ORDER BY created_at ASC, id ASC FOR UPDATE`, referredBy, rootRowID); err != nil {
+			return err
+		}
+		if len(siblings) >= 2 {
+			gratitudeRow := siblings[0]
+			activeRow := siblings[len(siblings)-1]
+			if _, err := tx.Exec(`UPDATE user_parents SET user_id=?, virtual_id=?, parent_id=?, updated_at=NOW() WHERE id=?`,
+				activeRow.UserID, activeRow.VirtualID, activeRow.ParentID, gratitudeRow.ID); err != nil {
+				return err
+			}
+			res, err := tx.Exec(`INSERT INTO user_parents (user_id, virtual_id, parent_id, node, created_at, updated_at)
+					VALUES (?, ?, ?, 'correct', NOW(), NOW())`, activeRow.UserID, activeRow.ParentID, activeRow.ParentID)
+			if err != nil {
+				return err
+			}
+			correctID, _ := res.LastInsertId()
+			*createdIDs = append(*createdIDs, uint64(correctID))
+			if _, err := tx.Exec("DELETE FROM user_parents WHERE id = ?", activeRow.ID); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
