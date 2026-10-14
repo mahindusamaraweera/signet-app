@@ -260,8 +260,14 @@ Run `php artisan config:cache` and restart the correct Horizon service with
 `php artisan horizon:terminate` under Supervisor. Keep the signer and the
 `blockchain` queue running. No new Laravel migration is needed; existing
 settlement columns store the swap identity, amounts and confirmation.
-The opt-in is frozen when a new custody purchase is created. Older first
-purchases are skipped; changing configuration never retroactively sells for them.
+Saved per-order company opt-ins are no longer required. When runtime settlement
+workers are enabled, completed first purchases previously marked `skipped` are
+checked again. Custody seals the complete commission list and sells the actual
+remaining token amount after confirmed payouts, including older orders whose
+saved company flag was false or missing. Previously confirmed/broadcast swaps
+keep their identities and amounts; never reset them. Existing address snapshots
+are preserved; missing destinations are captured from the configured addresses
+before a new settlement is prepared.
 
 Then configure Signet-app:
 
