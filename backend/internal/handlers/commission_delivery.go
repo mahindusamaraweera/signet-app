@@ -18,7 +18,7 @@ func StartCommissionDelivery(d *app.Deps) {
 		return
 	}
 	go func() {
-		ticker := time.NewTicker(time.Minute)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for {
 			var ids []uint64
@@ -26,14 +26,12 @@ func StartCommissionDelivery(d *app.Deps) {
 			if err != nil {
 				log.Printf("commission delivery queue: %v", err)
 			} else {
-				for _, id := range ids {
-					if err := syncCommissionDelivery(d, id); err != nil {
-						log.Printf("commission delivery %d: %v", id, err)
-						if _, retryErr := d.DB.Exec("UPDATE blockchain_commission_outbox SET last_checked_at=NOW() WHERE id=? AND status IN ('awaiting_authorization','authorized','confirming')", id); retryErr != nil {
-							log.Printf("commission delivery retry timestamp %d: %v", id, retryErr)
-						}
+				runPurchaseChecks(ids, func(id uint64) error { return syncCommissionDelivery(d, id) }, func(id uint64, err error) {
+					log.Printf("commission delivery %d: %v", id, err)
+					if _, retryErr := d.DB.Exec("UPDATE blockchain_commission_outbox SET last_checked_at=NOW() WHERE id=? AND status IN ('awaiting_authorization','authorized','confirming')", id); retryErr != nil {
+						log.Printf("commission delivery retry timestamp %d: %v", id, retryErr)
 					}
-				}
+				})
 			}
 			<-ticker.C
 		}

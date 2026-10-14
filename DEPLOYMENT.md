@@ -210,6 +210,30 @@ Existing commission outbox rows retry automatically; preserve their identities.
 A signer circuit breaker may take its configured open interval to close.
 The company sale waits for confirmed commission delivery.
 
+### Automatic package activation timing
+
+The Signet-app activation worker checks every 15 seconds and runs at most four
+purchase checks concurrently. Slow custody responses do not serialize the
+whole signup batch. Every check uses the existing purchase identity, ownership
+checks, database locks and custody idempotency; manual and automatic activation
+share that path. Deploy/restart the API to apply the worker change.
+Commission preparation and delivery also check every 15 seconds with at most
+four concurrent calls each. Custody uses dedicated `purchase-processing` and
+`deposit-sweeps` Horizon supervisors so signup/top-up processing and funding
+sweeps do not share the background audit/recovery queue. Confirmed USDT credits
+and completed USDT sweeps enqueue the existing pending purchase immediately.
+Company-only historical settlement/recovery jobs remain on `blockchain`.
+Deploy custody and run `php artisan config:cache` followed by
+`php artisan horizon:terminate`; Supervisor must restart Horizon. Verify
+`php artisan horizon:supervisors` includes both dedicated supervisors before
+relying on the new queues. Existing jobs on `blockchain` still drain there.
+Deploy and restart the Go API to apply faster polling. Keep the signer's nonce
+locks, transaction confirmation rules and idempotency storage intact.
+This improves polling latency but does not bypass deposit, sweep, swap, service
+fee or bonus confirmations. A funded purchase still needs investigation if its
+latest sync error or custody status shows a blocked stage. Keep custody Horizon,
+the blockchain queue and signer running; no new environment key is required.
+
 ### Commission remainder paid to company
 
 Keep the existing commission percentages and source USD/cap accounting; there
