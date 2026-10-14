@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { activationAction } from '../src/utils/purchaseActivation.js'
+import { activationAction, activationCheckMessage } from '../src/utils/purchaseActivation.js'
 
 const purchase = { id: 7, status: 'awaiting_deposit', package_price: '1', required_usdt: '1.10', purchase_kind: 'first' }
 test('activation accounts for the service fee and exact base units', () => {
@@ -22,4 +22,12 @@ test('completed, expired, missing, and blocked purchases have no activation butt
 test('top-up and stale/malformed balance guidance stays explicit', () => {
   assert.equal(activationAction({ ...purchase, purchase_kind: 'topup' }, { available: '1.10' }).label, 'Activate top-up')
   for (const available of [undefined, '-1', 'NaN', '1e3', '1.0000000000000000001']) assert.equal(activationAction(purchase, { available }).ready, false)
+})
+
+test('placement messaging distinguishes current state from historical sync failure', () => {
+  assert.match(activationCheckMessage({ last_sync_error: 'placement_required', placement_required: false }), /available now/)
+  assert.match(activationCheckMessage({ placement_required: true }), /needs review/)
+  assert.doesNotMatch(activationCheckMessage({ last_sync_error: 'placement_required' }), /placement needs review/)
+  assert.match(activationCheckMessage({ last_sync_error: 'activation_sync_unavailable', placement_required: false }), /last activation check/)
+  assert.equal(activationAction({ ...purchase, last_sync_error: 'placement_required', placement_required: false }, { available: '1.10' }).label, 'Activate package')
 })

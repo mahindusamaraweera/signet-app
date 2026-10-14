@@ -99,7 +99,7 @@ func syncAutomaticPurchaseForUser(d *app.Deps, id, expectedUserID uint64) error 
 	}
 	if intent.Kind != "topup" && intent.Status == "awaiting_deposit" {
 		var placementID uint64
-		if err := tx.Get(&placementID, "SELECT id FROM user_parents WHERE user_id=? AND node IN ('deactive','active') ORDER BY id LIMIT 1 FOR UPDATE", userID); err != nil {
+		if err := tx.Get(&placementID, "SELECT id FROM user_parents WHERE user_id=? AND node IN ('deactive','active','gratitude','correct') ORDER BY id LIMIT 1 FOR UPDATE", userID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return errPurchasePlacementRequired
 			}
