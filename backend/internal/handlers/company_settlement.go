@@ -20,7 +20,7 @@ func StartCompanySettlement(d *app.Deps) {
 		defer ticker.Stop()
 		for {
 			var ids []uint64
-			err := d.DB.Select(&ids, `SELECT p.id FROM package_purchase_intents p LEFT JOIN blockchain_company_settlements c ON c.purchase_intent_id=p.id WHERE p.status='completed' AND p.purchase_kind='first' AND (c.status IS NULL OR c.status IN ('pending','sealed')) ORDER BY COALESCE(c.last_checked_at,p.created_at),p.id LIMIT 50`)
+			err := d.DB.Select(&ids, `SELECT p.id FROM package_purchase_intents p LEFT JOIN blockchain_company_settlements c ON c.purchase_intent_id=p.id WHERE p.status='completed' AND p.purchase_kind='first' AND (c.status IS NULL OR c.status IN ('pending','sealed','skipped')) ORDER BY COALESCE(c.last_checked_at,p.created_at),p.id LIMIT 50`)
 			if err != nil {
 				log.Printf("company settlement queue: %v", err)
 			} else {
@@ -59,7 +59,7 @@ func syncCompanySettlement(d *app.Deps, id uint64) error {
 	if err = tx.Get(&state, "SELECT status FROM blockchain_company_settlements WHERE purchase_intent_id=? FOR UPDATE", id); err != nil {
 		return err
 	}
-	if state == "confirmed" || state == "skipped" {
+	if state == "confirmed" {
 		return tx.Commit()
 	}
 	var rows []struct {
@@ -94,7 +94,7 @@ func syncCompanySettlement(d *app.Deps, id uint64) error {
 	} else if *result.Settled {
 		state = "confirmed"
 	}
-	updated, err := d.DB.Exec(`UPDATE blockchain_company_settlements SET status=?,manifest_hash=NULLIF(?,''),updated_at=NOW() WHERE purchase_intent_id=? AND status IN ('pending','sealed')`, state, result.Hash, id)
+	updated, err := d.DB.Exec(`UPDATE blockchain_company_settlements SET status=?,manifest_hash=NULLIF(?,''),updated_at=NOW() WHERE purchase_intent_id=? AND status IN ('pending','sealed','skipped')`, state, result.Hash, id)
 	if err != nil {
 		return err
 	}
