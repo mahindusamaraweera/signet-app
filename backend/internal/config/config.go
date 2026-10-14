@@ -24,6 +24,7 @@ type Config struct {
 	BlockchainTopupEnabled                  bool
 	BlockchainCommissionPreparationEnabled  bool
 	BlockchainCommissionDeliveryEnabled     bool
+	BlockchainCompanySettlementEnabled      bool
 	BlockchainServiceURL                    string
 	BlockchainServiceToken                  string
 	BlockchainWithdrawalAuthorizationKey    string
@@ -111,6 +112,7 @@ func Load() *Config {
 		BlockchainTopupEnabled:                  envBool("BLOCKCHAIN_TOPUP_ENABLED", false),
 		BlockchainCommissionPreparationEnabled:  envBool("BLOCKCHAIN_COMMISSION_PREPARATION_ENABLED", false),
 		BlockchainCommissionDeliveryEnabled:     envBool("BLOCKCHAIN_COMMISSION_DELIVERY_ENABLED", false),
+		BlockchainCompanySettlementEnabled:      envBool("BLOCKCHAIN_COMPANY_SETTLEMENT_ENABLED", false),
 		BlockchainServiceURL:                    env("BLOCKCHAIN_SERVICE_URL", ""),
 		BlockchainServiceToken:                  env("BLOCKCHAIN_SERVICE_TOKEN", ""),
 		BlockchainWithdrawalAuthorizationKey:    env("SIGNET_APP_WITHDRAWAL_AUTHORIZATION_KEY", ""),

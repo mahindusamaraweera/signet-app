@@ -1,0 +1,7 @@
+Require owner review for GitHub Actions workflows
+
+/.github/workflows/ @mahindusamaraweera
+
+Require owner review for CODEOWNERS changes
+
+/.github/CODEOWNERS @mahindusamaraweera

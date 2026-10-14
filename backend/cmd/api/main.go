@@ -111,6 +111,7 @@ func main() {
 			handlers.StartRegistrationReopening(deps)
 			handlers.StartCommissionPreparation(deps)
 			handlers.StartCommissionDelivery(deps)
+			handlers.StartCompanySettlement(deps)
 			handlers.StartWithdrawalSubmission(deps)
 			handlers.StartWithdrawalCancellation(deps)
 		}
