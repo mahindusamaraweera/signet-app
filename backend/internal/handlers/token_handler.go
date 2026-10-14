@@ -600,6 +600,11 @@ func creditWalletTx(tx *sqlx.Tx, userID uint64, amount float64, description stri
 				return err
 			}
 		}
+		// The recipient already received the full commission above. Preserve
+		// this secondary company ledger entry without authorizing a second payout.
+		if _, err := tx.Exec("UPDATE blockchain_commission_outbox SET status='accounting_only' WHERE earn_log_id=? AND beneficiary_user_id=1 AND status='requires_reconciliation' AND remote_payment_id IS NULL AND transfer_tx_hash IS NULL", logID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
