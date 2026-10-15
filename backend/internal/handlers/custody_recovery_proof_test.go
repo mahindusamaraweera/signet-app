@@ -67,3 +67,15 @@ func TestCustodyProofRejectsNonProductionBeforeDatabaseAccess(t *testing.T) {
 		t.Fatal("staging proof accepted")
 	}
 }
+
+func TestCustodyProofExplainsLoadedEnvironmentWithoutExposingCredential(t *testing.T) {
+	for _, tc := range []struct{ env, key, want string }{
+		{"production ", strings.Repeat("secret", 6), `loaded APP_ENV="production "`},
+		{"production", "private-short-key", "loaded 17 bytes"},
+	} {
+		_, err := CustodyRecoveryProof(&app.Deps{Cfg: &config.Config{AppEnv: tc.env, BlockchainServiceToken: tc.key}}, CustodyRecoveryEvidence{})
+		if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), tc.key) {
+			t.Fatalf("expected redacted diagnostic %q, got %v", tc.want, err)
+		}
+	}
+}
