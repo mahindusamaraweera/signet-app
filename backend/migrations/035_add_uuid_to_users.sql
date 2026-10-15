@@ -2,9 +2,10 @@
 -- built from created_at (48-bit Unix ms, falling back to updated_at, then
 -- the epoch) with the user id as the trailing 48 bits, so every value is
 -- unique and re-running the derivation yields the same result. New users
--- get one from the application (registrationverification.newUUID); the
--- UUID() default covers any other writer to this shared table.
-ALTER TABLE users ADD COLUMN uuid CHAR(36) NULL DEFAULT (UUID());
+-- get one from the application (registrationverification.newUUID).
+-- No DEFAULT (UUID()): with statement-based binary logging MySQL rejects it
+-- as replication-unsafe (error 1674).
+ALTER TABLE users ADD COLUMN uuid CHAR(36) NULL;
 
 UPDATE users SET uuid = LOWER(CONCAT_WS('-',
     SUBSTRING(LPAD(HEX(FLOOR(UNIX_TIMESTAMP(COALESCE(created_at, updated_at, '1970-01-01 00:00:01')) * 1000)), 12, '0'), 1, 8),
@@ -13,4 +14,4 @@ UPDATE users SET uuid = LOWER(CONCAT_WS('-',
     '8000',
     LPAD(HEX(id), 12, '0')));
 
-ALTER TABLE users MODIFY COLUMN uuid CHAR(36) NOT NULL DEFAULT (UUID()), ADD UNIQUE KEY users_uuid_unique (uuid);
+ALTER TABLE users MODIFY COLUMN uuid CHAR(36) NOT NULL, ADD UNIQUE KEY users_uuid_unique (uuid);
