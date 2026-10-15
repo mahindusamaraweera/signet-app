@@ -564,7 +564,7 @@ func registerStep2SubmitHandler(d *app.Deps) http.HandlerFunc {
 				httpx.Error(w, 422, "Package commercial terms are not approved")
 				return
 			}
-			if _, e := tx.Exec(`INSERT INTO package_purchase_intents (user_id,user_package_id,package_price,remaining_usdt,commission_user_id,commission_percent,service_fee_usdt,required_usdt,bonus_percent) VALUES (?,?,?,?,?,?,?,?,?)`, newUserID, newUserPackageID, buyPackage.Price, terms.Required, findParent.ParentID, percentage, terms.Fee, terms.Required, terms.BonusPercent); e != nil {
+			if _, e := tx.Exec(`INSERT INTO package_purchase_intents (user_id,user_package_id,package_id,package_price,remaining_usdt,commission_user_id,commission_percent,service_fee_usdt,required_usdt,bonus_percent) VALUES (?,?,?,?,?,?,?,?,?,?)`, newUserID, newUserPackageID, buyPackage.ID, buyPackage.Price, terms.Required, findParent.ParentID, percentage, terms.Fee, terms.Required, terms.BonusPercent); e != nil {
 				httpx.Error(w, 500, "Could not create purchase intent")
 				return
 			}

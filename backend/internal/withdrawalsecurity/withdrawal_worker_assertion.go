@@ -44,6 +44,9 @@ func (s *Service) BuildQueuedWithdrawalAssertion(ctx context.Context, id string,
 	if json.Unmarshal([]byte(encoded), &stored) != nil || stored != expected || owner != expected.UserID || version != expected.SecurityVersion || digest != expected.Digest() || status != "pending" || !storedRevision.Valid || !hmac.Equal([]byte(revision), []byte(storedRevision.String)) {
 		return WithdrawalAssertion{}, "", ErrWithdrawalAuthorization
 	}
+	if err := s.bindAuthorizationUUID(ctx, tx, &a); err != nil {
+		return WithdrawalAssertion{}, "", err
+	}
 	assertion, signature, err := signWithdrawalAssertion(a, signingKey, now)
 	if err != nil {
 		return WithdrawalAssertion{}, "", err

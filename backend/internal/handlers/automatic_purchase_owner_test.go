@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -45,5 +46,21 @@ func TestAutomaticPurchaseRejectsOwnerDriftBeforeRemoteDebit(t *testing.T) {
 				t.Fatalf("unsafe ownership boundary: %v", err)
 			}
 		})
+	}
+}
+
+func TestFrozenPackageMismatchStopsBeforeRemoteDebit(t *testing.T) {
+	fixture := &commissionSQLFixture{steps: []commissionSQLStep{
+		{contains: "SELECT user_id FROM package_purchase_intents", columns: []string{"user_id"}, values: []driver.Value{int64(461)}},
+		{contains: "SELECT status FROM users", columns: []string{"status"}, values: []driver.Value{"pending"}},
+		{contains: "SELECT id,user_id,user_package_id", columns: []string{"id", "user_id", "user_package_id", "package_price", "package_id", "package_snapshot_id", "status"}, values: []driver.Value{int64(2), int64(461), int64(496), "1000", int64(3), int64(3), "awaiting_deposit"}},
+		{contains: "SELECT user_id FROM user_packages", columns: []string{"user_id"}, values: []driver.Value{int64(461)}},
+		{contains: "SELECT CAST(package AS UNSIGNED)", columns: []string{"package"}, values: []driver.Value{int64(14)}},
+	}}
+	db := sqlx.NewDb(sql.OpenDB(fixture), "commission-fixture")
+	defer db.Close()
+	err := syncAutomaticPurchase(&app.Deps{DB: db}, 2)
+	if err == nil || !strings.Contains(err.Error(), "package changed") || fixture.committed || !fixture.rolledBack || len(fixture.steps) != 0 {
+		t.Fatalf("unsafe debit: %v", err)
 	}
 }

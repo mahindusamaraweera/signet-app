@@ -11,6 +11,7 @@ import (
 )
 
 type WithdrawalAuthorization struct {
+	ExternalUUID string `json:"-"`
 	ID           string
 	Terms        WithdrawalTerms
 	ProofHash    string

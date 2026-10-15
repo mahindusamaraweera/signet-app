@@ -104,7 +104,7 @@ func syncAutomaticPurchaseForUser(d *app.Deps, id, expectedUserID uint64) error 
 		return err
 	}
 	var intent blockchain.PurchaseIntent
-	if err := tx.Get(&intent, `SELECT id,user_id,user_package_id,package_price,purchase_kind,status,COALESCE(bonus_percent,0) AS bonus_percent,COALESCE(CAST(service_fee_usdt AS CHAR),'') AS service_fee_usdt,COALESCE(CAST(required_usdt AS CHAR),'') AS required_usdt,commission_user_id,commission_percent,(SELECT CAST(package AS UNSIGNED) FROM user_packages WHERE id=user_package_id) AS package_id FROM package_purchase_intents WHERE id=? AND status NOT IN ('completed','expired') FOR UPDATE`, id); err == sql.ErrNoRows {
+	if err := tx.Get(&intent, `SELECT id,user_id,user_package_id,package_price,purchase_kind,status,COALESCE(bonus_percent,0) AS bonus_percent,COALESCE(CAST(service_fee_usdt AS CHAR),'') AS service_fee_usdt,COALESCE(CAST(required_usdt AS CHAR),'') AS required_usdt,commission_user_id,commission_percent,package_id AS package_snapshot_id,COALESCE(package_id,(SELECT CAST(package AS UNSIGNED) FROM user_packages WHERE id=user_package_id)) AS package_id FROM package_purchase_intents WHERE id=? AND status NOT IN ('completed','expired') FOR UPDATE`, id); err == sql.ErrNoRows {
 		return nil
 	} else if err != nil {
 		return err
@@ -124,6 +124,15 @@ func syncAutomaticPurchaseForUser(d *app.Deps, id, expectedUserID uint64) error 
 	}
 	if packageOwner != userID {
 		return fmt.Errorf("%w: intent %d: user_package %d belongs to user %d, not %d", blockchain.ErrUnavailable, id, intent.UserPackageID, packageOwner, userID)
+	}
+	if intent.PackageSnapshotID.Valid {
+		var currentPackage uint64
+		if err := tx.Get(&currentPackage, "SELECT CAST(package AS UNSIGNED) FROM user_packages WHERE id=?", intent.UserPackageID); err != nil {
+			return err
+		}
+		if currentPackage != intent.PackageID {
+			return fmt.Errorf("purchase package changed; reconciliation required before funding")
+		}
 	}
 	if intent.Kind != "topup" && intent.Status == "awaiting_deposit" {
 		var placementID uint64

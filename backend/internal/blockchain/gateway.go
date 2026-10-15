@@ -4,6 +4,7 @@ package blockchain
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,13 +23,16 @@ var ErrRejected = errors.New("blockchain request rejected without applying chang
 var ErrConflict = errors.New("blockchain request requires reconciliation")
 
 type Gateway struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	identityResolver func(context.Context, uint64) (string, error)
+	identityReverse  func(context.Context, string) (uint64, error)
+	environment      string
+	baseURL          string
+	token            string
+	client           *http.Client
 }
 
 // New rejects insecure remote transports and never follows credential-bearing redirects.
-func New(baseURL, token string) (*Gateway, error) {
+func New(baseURL, token string, environment ...string) (*Gateway, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errors.New("invalid blockchain service URL")
@@ -39,7 +44,14 @@ func New(baseURL, token string) (*Gateway, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, errors.New("blockchain service token is required")
 	}
-	return &Gateway{baseURL: strings.TrimRight(baseURL, "/"), token: token,
+	env := ""
+	if len(environment) > 0 {
+		env = environment[0]
+	}
+	if env != "" && !regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`).MatchString(env) {
+		return nil, errors.New("invalid integration environment")
+	}
+	return &Gateway{environment: env, baseURL: strings.TrimRight(baseURL, "/"), token: token,
 		client: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
@@ -123,6 +135,20 @@ func (g *Gateway) EnsureWallet(ctx context.Context, userID uint64) (*Wallet, err
 }
 
 func (g *Gateway) request(ctx context.Context, method, path, key string, body interface{}, out interface{}) error {
+	var back map[string]string
+	if g.identityResolver != nil {
+		wire, mapping, err := g.prepareUUIDWire(ctx, body)
+		if err != nil {
+			return err
+		}
+		body = wire
+		owner, _ := wire["external_user_id"].(string)
+		if owner == "" {
+			owner, _ = wire["external_buyer_id"].(string)
+		}
+		key = fmt.Sprintf("signet-app:uuid-v1:%x", sha256.Sum256([]byte(key+":"+owner)))
+		back = mapping
+	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -134,6 +160,12 @@ func (g *Gateway) request(ctx context.Context, method, path, key string, body in
 	req.Header.Set("Authorization", "Bearer "+g.token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	if g.environment != "" {
+		req.Header.Set("X-Signet-App-Environment", g.environment)
+	}
+	if g.identityResolver != nil {
+		req.Header.Set("X-Signet-Identity-Version", "uuid-v1")
+	}
 	req.Header.Set("Idempotency-Key", key)
 	// Errors keep their sentinel (errors.Is still works) but say why, so the
 	// "purchase intent N: …" worker log explains an activation_sync_unavailable.
@@ -157,6 +189,12 @@ func (g *Gateway) request(ctx context.Context, method, path, key string, body in
 	}
 	if len(data) > 65536 {
 		return fmt.Errorf("%w: %s %s: response larger than 64 KiB", ErrUnavailable, method, path)
+	}
+	if back != nil {
+		data, err = normalizeUUIDResponse(data, back)
+		if err != nil {
+			return ErrUnavailable
+		}
 	}
 	if err := json.Unmarshal(data, out); err != nil {
 		return fmt.Errorf("%w: %s %s: invalid JSON response: %v", ErrUnavailable, method, path, err)
