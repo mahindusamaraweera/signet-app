@@ -2,7 +2,7 @@
 // Ports company/dashboard.blade.php (route('company.dashboard')). See
 // dashboard_handler.go's companyDashboardHandler for the response shape.
 //
-// The original's date filter is a plain GET form and its paginator links
+// The date (+ optional country) filter is a plain GET form and its paginator links
 // are plain ?page=N links (which drop the filter, as Laravel's links() does
 // without withQueryString()), so both drive the URL query here and the page
 // re-fetches from it — reload/back behave the same way.
@@ -26,6 +26,7 @@ const resp = ref(null)
 const loadError = ref('')
 const fromDate = ref('')
 const toDate = ref('')
+const countryId = ref('')
 const selectedUserId = ref('')
 
 useSignetDashboard(resp)
@@ -35,11 +36,13 @@ async function fetchDashboard() {
   const q = route.query
   fromDate.value = q.from_date || ''
   toDate.value = q.to_date || ''
+  countryId.value = q.country_id || ''
   try {
     const params = {}
     if (q.page) params.page = q.page
     if (q.from_date) params.from_date = q.from_date
     if (q.to_date) params.to_date = q.to_date
+    if (q.country_id) params.country_id = q.country_id
     const { data } = await api.get('/company/dashboard', { params })
     resp.value = data
     dashboardMeta.setNewActivations(data.new_activations)
@@ -54,6 +57,7 @@ function applyFilter() {
   const query = {}
   query.from_date = fromDate.value
   query.to_date = toDate.value
+  if (countryId.value) query.country_id = countryId.value
   router.push({ path: route.path, query })
 }
 
@@ -161,15 +165,22 @@ function percentage(pkg) {
           <div class="card border-0 shadow-sm rounded-4 mb-4 bg-light">
             <div class="card-body py-3">
               <form method="GET" class="row align-items-end g-2" @submit.prevent="applyFilter">
-                <div class="col-md-4">
+                <div class="col-md-3">
                   <label class="small fw-semibold text-muted mb-1">From Date</label>
                   <input v-model="fromDate" type="date" name="from_date" class="form-control" />
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
                   <label class="small fw-semibold text-muted mb-1">To Date</label>
                   <input v-model="toDate" type="date" name="to_date" class="form-control" />
                 </div>
-                <div class="col-md-4 d-flex gap-2">
+                <div class="col-md-3">
+                  <label class="small fw-semibold text-muted mb-1">Country</label>
+                  <select v-model="countryId" name="country_id" class="form-select">
+                    <option value="">All Countries</option>
+                    <option v-for="c in resp.countries" :key="c.id" :value="String(c.id)">{{ c.name }} ({{ c.code }})</option>
+                  </select>
+                </div>
+                <div class="col-md-3 d-flex gap-2">
                   <button type="submit" class="btn btn-success w-100">
                     Apply Filter
                   </button>

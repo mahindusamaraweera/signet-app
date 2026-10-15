@@ -405,6 +405,12 @@ func companyDashboardHandler(d *app.Deps) http.HandlerFunc {
 			where += " AND up.activated_at BETWEEN ? AND ?"
 			args = append(args, fromDate+" 00:00:00", toDate+" 23:59:59")
 		}
+		// Optional country filter (activating user's users.country_id); combines
+		// with the date range or applies on its own.
+		if countryID, err := strconv.ParseUint(r.URL.Query().Get("country_id"), 10, 64); err == nil && countryID > 0 {
+			where += " AND up.user_id IN (SELECT id FROM users WHERE country_id = ?)"
+			args = append(args, countryID)
+		}
 
 		type packageWiseRow struct {
 			PackageID   uint64  `db:"package_id" json:"package_id"`
@@ -434,6 +440,14 @@ func companyDashboardHandler(d *app.Deps) http.HandlerFunc {
 		var userIDs []uint64
 		_ = d.DB.Select(&userIDs, "SELECT id FROM users ORDER BY id")
 
+		// Country filter options.
+		var countries []struct {
+			ID   uint64 `db:"id" json:"id"`
+			Code string `db:"code" json:"code"`
+			Name string `db:"name" json:"name"`
+		}
+		_ = d.DB.Select(&countries, "SELECT id, code, name FROM countries WHERE deleted_at IS NULL ORDER BY name")
+
 		rankResult, rocResult, allUsersCount, newActivationsCount := dashTreeWidgets(d, user)
 
 		httpx.OK(w, map[string]interface{}{
@@ -444,6 +458,7 @@ func companyDashboardHandler(d *app.Deps) http.HandlerFunc {
 			"my_wallet":           myWallet,
 			"package_wise_counts": packageWiseCounts,
 			"grand_total":         grandTotal,
+			"countries":           countries,
 			"rank":                rankResult,
 			"roc":                 rocResult,
 			"all_users":           allUsersCount,
