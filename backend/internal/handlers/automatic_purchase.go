@@ -10,6 +10,7 @@ import (
 	"signet-backend/internal/app"
 	"signet-backend/internal/blockchain"
 	"signet-backend/internal/wallet"
+	"sync"
 	"time"
 )
 
@@ -18,22 +19,49 @@ var errPurchasePlacementRequired = errors.New("a valid placement is required bef
 // Retry the same durable intent; the financial service alone reserves and swaps funds.
 func StartAutomaticPurchases(d *app.Deps) {
 	go func() {
-		ticker := time.NewTicker(time.Minute)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for {
 			var ids []uint64
 			if err := d.DB.Select(&ids, "SELECT id FROM package_purchase_intents WHERE status NOT IN ('completed','expired') ORDER BY COALESCE(last_checked_at,created_at),id LIMIT 50"); err != nil {
 				log.Printf("purchase intents: %v", err)
 			} else {
-				for _, id := range ids {
-					if err := retryAutomaticPurchase(d, id, 0); err != nil {
-						log.Printf("purchase intent %d: %v", id, err)
-					}
-				}
+				runPurchaseChecks(ids, func(id uint64) error {
+					return retryAutomaticPurchase(d, id, 0)
+				}, func(id uint64, err error) {
+					log.Printf("purchase intent %d: %v", id, err)
+				})
 			}
 			<-ticker.C
 		}
 	}()
+}
+
+// Bound parallel custody reads so a slow purchase cannot block every other
+// signup. Each check still uses the same locked/idempotent activation path.
+func runPurchaseChecks(ids []uint64, check func(uint64) error, failed func(uint64, error)) {
+	jobs := make(chan uint64, len(ids))
+	for _, id := range ids {
+		jobs <- id
+	}
+	close(jobs)
+	workers := 4
+	if len(ids) < workers {
+		workers = len(ids)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for id := range jobs {
+				if err := check(id); err != nil {
+					failed(id, err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // Both the worker and the authenticated retry use the same audited,

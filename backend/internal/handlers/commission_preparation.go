@@ -16,22 +16,19 @@ func StartCommissionPreparation(d *app.Deps) {
 		return
 	}
 	go func() {
-		ticker := time.NewTicker(time.Minute)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for {
 			var ids []uint64
 			if err := d.DB.Select(&ids, `SELECT o.id FROM blockchain_commission_outbox o JOIN package_purchase_intents p ON p.id=o.purchase_intent_id WHERE o.status='awaiting_policy' AND p.status='completed' AND o.commission_kind IN ('direct_team','gratitude','spillover','leadership','executive') ORDER BY COALESCE(o.last_checked_at,o.created_at),o.id LIMIT 50`); err != nil {
 				log.Printf("commission preparation queue: %v", err)
 			} else {
-				for _, id := range ids {
-					if err := syncCommissionPreparation(d, id); err != nil {
-						log.Printf("commission preparation %d: %v", id, err)
-						// Rotate a failed draft without erasing its identity or terms.
-						if _, checkErr := d.DB.Exec("UPDATE blockchain_commission_outbox SET last_checked_at=NOW() WHERE id=? AND status='awaiting_policy'", id); checkErr != nil {
-							log.Printf("commission retry timestamp %d: %v", id, checkErr)
-						}
+				runPurchaseChecks(ids, func(id uint64) error { return syncCommissionPreparation(d, id) }, func(id uint64, err error) {
+					log.Printf("commission preparation %d: %v", id, err)
+					if _, retryErr := d.DB.Exec("UPDATE blockchain_commission_outbox SET last_checked_at=NOW() WHERE id=? AND status='awaiting_policy'", id); retryErr != nil {
+						log.Printf("commission preparation retry timestamp %d: %v", id, retryErr)
 					}
-				}
+				})
 			}
 			<-ticker.C
 		}
