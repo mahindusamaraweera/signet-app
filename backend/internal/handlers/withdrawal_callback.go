@@ -48,6 +48,19 @@ func withdrawalCallbackHandler(d *app.Deps) http.HandlerFunc {
 			httpx.Error(w, 422, "Invalid revalidation request")
 			return
 		}
+		if d.Blockchain != nil && body.Terms.UserUUID != "" {
+			var owner uint64
+			if err := d.DB.GetContext(r.Context(), &owner, "SELECT id FROM users WHERE uuid=?", body.Terms.UserUUID); err != nil {
+				httpx.Error(w, 422, "Invalid customer UUID")
+				return
+			}
+			if body.Terms.UserID != 0 && body.Terms.UserID != owner {
+				httpx.Error(w, 422, "Customer identity mismatch")
+				return
+			}
+			body.Terms.UserID = owner
+			body.Terms.UserUUID = "" // Local approval digests keep their internal foreign key.
+		}
 		remoteID, err := strconv.ParseUint(body.RemoteID, 10, 64)
 		if err != nil || remoteID == 0 || strconv.FormatUint(remoteID, 10) != body.RemoteID {
 			httpx.Error(w, 422, "Invalid revalidation request")

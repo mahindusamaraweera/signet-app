@@ -30,7 +30,7 @@ func main() {
 			os.Exit(1)
 		}
 		var err error
-		gateway, err = blockchain.New(cfg.BlockchainServiceURL, cfg.BlockchainServiceToken)
+		gateway, err = blockchain.New(cfg.BlockchainServiceURL, cfg.BlockchainServiceToken, cfg.AppEnv)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -42,6 +42,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer conn.Close()
+	if gateway != nil {
+		gateway.UseSQLUUIDIdentity(conn.DB)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

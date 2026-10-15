@@ -12,8 +12,9 @@ var ErrInvalidChallenge = errors.New("invalid, expired or exhausted email challe
 var challengeIDPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 type Service struct {
-	db  *sql.DB
-	key []byte
+	requireUUID bool
+	db          *sql.DB
+	key         []byte
 }
 
 func NewService(db *sql.DB, key []byte) (*Service, error) {

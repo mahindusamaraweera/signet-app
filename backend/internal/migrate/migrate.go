@@ -184,6 +184,12 @@ func (m *Migrator) Up(ctx context.Context) error {
 			fmt.Fprintf(m.out, "%-*s  ✓ already applied%s\n", width, mig.UpFile, note)
 			continue
 		}
+		if adopted, err := m.adoptExistingUsersUUID(ctx, mig); err != nil {
+			return err
+		} else if adopted {
+			ran++
+			continue
+		}
 		fmt.Fprintf(m.out, "%-*s  → applying...\n", width, mig.UpFile)
 		took, err := m.apply(ctx, mig)
 		if err != nil {
