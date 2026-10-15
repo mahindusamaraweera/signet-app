@@ -14,6 +14,7 @@ import (
 )
 
 func main() {
+	checkEnv := flag.Bool("check-environment", false, "print loaded environment name and token length only; no DB access or proof")
 	users := flag.String("users", "", "comma-separated production users; discovers each pending purchase and sole eligible deposit")
 	var e handlers.CustodyRecoveryEvidence
 	flag.Uint64Var(&e.UserID, "user", 0, "production user ID")
@@ -25,6 +26,14 @@ func main() {
 	flag.StringVar(&e.OldAddress, "old-address", "", "address that received the deposit")
 	flag.Parse()
 	cfg := config.Load()
+	if *checkEnv {
+		out, err := json.Marshal(map[string]interface{}{"app_env": cfg.AppEnv, "production": cfg.AppEnv == "production", "integration_token_bytes": len(cfg.BlockchainServiceToken), "integration_token_length_valid": len(cfg.BlockchainServiceToken) >= 32})
+		if err != nil {
+			fail(err)
+		}
+		fmt.Println(string(out))
+		return
+	}
 	conn, err := db.Connect(cfg)
 	if err != nil {
 		fail(err)

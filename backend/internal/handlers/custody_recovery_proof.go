@@ -28,8 +28,11 @@ type CustodyRecoveryEvidence struct {
 // Read-only proof of the pending production purchase. The operator must stop
 // the API and disable staging first; this command never queues or pays anything.
 func CustodyRecoveryProof(d *app.Deps, e CustodyRecoveryEvidence) ([]byte, error) {
-	if d.Cfg.AppEnv != "production" || len(d.Cfg.BlockchainServiceToken) < 32 {
-		return nil, fmt.Errorf("production environment and integration credential are required")
+	if d.Cfg.AppEnv != "production" {
+		return nil, fmt.Errorf("recovery requires APP_ENV=production; loaded APP_ENV=%q", d.Cfg.AppEnv)
+	}
+	if len(d.Cfg.BlockchainServiceToken) < 32 {
+		return nil, fmt.Errorf("recovery requires BLOCKCHAIN_SERVICE_TOKEN of at least 32 bytes; loaded %d bytes (secret hidden)", len(d.Cfg.BlockchainServiceToken))
 	}
 	if e.UserID == 0 || e.IntentID == 0 {
 		return nil, fmt.Errorf("production user and intent are required")
