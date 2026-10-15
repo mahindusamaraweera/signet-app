@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +41,12 @@ func signWithdrawalAssertion(a WithdrawalAuthorization, key []byte, now time.Tim
 	}
 	t := a.Terms
 	assertion := WithdrawalAssertion{AuthorizationID: a.ID, ExternalUserID: strconv.FormatUint(t.UserID, 10), SecurityVersion: strconv.FormatUint(t.SecurityVersion, 10), AddressID: t.AddressID, Destination: t.Destination, Network: t.Network, Asset: t.Asset, Gross: t.Gross, Fee: t.Fee, Net: t.Net, IssuedAt: strconv.FormatInt(now.Unix(), 10), ExpiresAt: strconv.FormatInt(now.Add(time.Minute).Unix(), 10)}
+	if a.ExternalUUID != "" {
+		if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(a.ExternalUUID) {
+			return WithdrawalAssertion{}, "", ErrWithdrawalAuthorization
+		}
+		assertion.ExternalUserID = a.ExternalUUID
+	}
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(assertion.payload()))
 	return assertion, hex.EncodeToString(mac.Sum(nil)), nil

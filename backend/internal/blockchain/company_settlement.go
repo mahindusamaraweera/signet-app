@@ -38,6 +38,18 @@ func (g *Gateway) SealFirstCompanyManifest(ctx context.Context, intent PurchaseI
 	if total.Cmp(price) > 0 || len(rows) > 20 {
 		return nil, ErrUnavailable
 	}
+	var identityBindings interface{}
+	if g.identityResolver != nil {
+		wire, _, err := g.prepareUUIDWire(ctx, map[string]interface{}{"external_user_id": fmt.Sprint(intent.UserID), "commissions": rows})
+		if err != nil {
+			return nil, err
+		}
+		identityBindings = wire["identity_bindings"]
+		encoded, _ := json.Marshal(wire["commissions"])
+		if err := json.Unmarshal(encoded, &rows); err != nil {
+			return nil, err
+		}
+	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i]["external_outbox_id"] < rows[j]["external_outbox_id"] })
 	canonical, err := json.Marshal(rows)
 	if err != nil {
@@ -45,7 +57,7 @@ func (g *Gateway) SealFirstCompanyManifest(ctx context.Context, intent PurchaseI
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256(canonical))
 	var result CompanySettlementResult
-	err = g.request(ctx, "POST", "/api/v1/integration/package-purchases/company-manifest", fmt.Sprintf("signet-app:first-company-manifest:%d", intent.ID), map[string]interface{}{"source": "signet-app", "external_user_id": fmt.Sprint(intent.UserID), "external_purchase_id": fmt.Sprint(intent.ID), "commissions": rows}, &result)
+	err = g.request(ctx, "POST", "/api/v1/integration/package-purchases/company-manifest", fmt.Sprintf("signet-app:first-company-manifest:%d", intent.ID), map[string]interface{}{"source": "signet-app", "external_user_id": fmt.Sprint(intent.UserID), "external_purchase_id": fmt.Sprint(intent.ID), "commissions": rows, "identity_bindings": identityBindings}, &result)
 	if err != nil {
 		return nil, err
 	}

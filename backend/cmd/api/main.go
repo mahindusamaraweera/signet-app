@@ -64,12 +64,18 @@ func main() {
 		log.Printf("withdrawal security unavailable: check signing key configuration")
 	}
 	if cfg.BlockchainEnabled {
-		deps.Blockchain, err = blockchain.New(cfg.BlockchainServiceURL, cfg.BlockchainServiceToken)
+		deps.Blockchain, err = blockchain.New(cfg.BlockchainServiceURL, cfg.BlockchainServiceToken, cfg.AppEnv)
 		if err != nil {
 			log.Fatalf("blockchain configuration: %v", err)
 		}
 	}
 
+	if deps.Blockchain != nil {
+		deps.Blockchain.UseSQLUUIDIdentity(conn.DB)
+	}
+	if deps.WithdrawalSecurity != nil {
+		deps.WithdrawalSecurity.RequireUUIDIdentity()
+	}
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
