@@ -62,7 +62,7 @@ rm -rf "$rel"
 mkdir -p "$rel"
 tar -xzf "$tarball" -C "$rel" --no-same-owner
 rm -f "$tarball"
-for f in signet-api migrate frontend/index.html; do
+for f in signet-api migrate custody-recovery-proof frontend/index.html; do
 	[[ -e "$rel/$f" ]] || die "release is missing $f"
 done
 log "release $rev unpacked → $rel"
@@ -99,6 +99,7 @@ if [[ -f "$bin" ]]; then
 fi
 install -o "${owner%%:*}" -g "${owner##*:}" -m 0755 "$rel/signet-api" "$bin.new"
 mv -f "$bin.new" "$bin"
+install -o "${owner%%:*}" -g "${owner##*:}" -m 0755 "$rel/custody-recovery-proof" "$APP_DIR/backend/custody-recovery-proof"
 # Let the API read its own journal for GET /api/v1/admin/logs (read-only
 # group; takes effect with the restart below). Idempotent.
 svc_user="$(systemctl show -p User --value "$SERVICE" 2>/dev/null || true)"

@@ -122,7 +122,7 @@ func createBlockchainTopup(d *app.Deps, w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, 500, "Database error")
 		return
 	}
-	result, err = tx.Exec(`INSERT INTO package_purchase_intents (user_id,user_package_id,package_price,remaining_usdt,commission_user_id,commission_percent,purchase_kind,service_fee_usdt,required_usdt,bonus_percent) VALUES (?,?,?,?,?,?,'topup',?,?,0)`, user.ID, userPackageID, pkg.Price, terms.Required, beneficiary, percent, terms.Fee, terms.Required)
+	result, err = tx.Exec(`INSERT INTO package_purchase_intents (user_id,user_package_id,package_id,package_price,remaining_usdt,commission_user_id,commission_percent,purchase_kind,service_fee_usdt,required_usdt,bonus_percent) VALUES (?,?,?,?,?,?,?,'topup',?,?,0)`, user.ID, userPackageID, packageID, pkg.Price, terms.Required, beneficiary, percent, terms.Fee, terms.Required)
 	if err != nil {
 		httpx.Error(w, 500, "Database error")
 		return
