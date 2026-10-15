@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
 	"github.com/go-chi/chi/v5"
+	"log"
 	"net/http"
 	"regexp"
 	"signet-backend/internal/app"
@@ -67,6 +69,11 @@ func RegisterTierAccountLinkRoutes(r chi.Router, d *app.Deps) {
 			}
 			authorizationURL, err := d.Blockchain.BeginTierLink(r.Context(), userID, state, verifier)
 			if err != nil {
+				log.Printf("tier-link/begin: user %d: %v", userID, err)
+				if errors.Is(err, blockchain.ErrConflict) {
+					httpx.Error(w, 409, "Tier connection needs identity review. Contact support; no balances or vesting have changed.")
+					return
+				}
 				httpx.Error(w, 503, "Tier authorization temporarily unavailable")
 				return
 			}

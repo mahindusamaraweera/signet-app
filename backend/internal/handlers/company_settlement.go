@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/jmoiron/sqlx"
 	"log"
+	"math/big"
 	"signet-backend/internal/app"
 	"signet-backend/internal/blockchain"
 	"time"
@@ -62,6 +63,28 @@ func syncCompanySettlement(d *app.Deps, id uint64) error {
 	}
 	if state == "confirmed" {
 		return tx.Commit()
+	}
+	// The reviewed legacy production order is already paid in custody. Read its
+	// audited receipt instead of resealing UUID terms or replaying any payout.
+	if d.Cfg != nil && d.Cfg.AppEnv == "production" && intent.UserID == 460 && id == 1 {
+		price, valid := new(big.Rat).SetString(intent.Price)
+		if !valid || price.Cmp(big.NewRat(1000, 1)) != 0 {
+			return fmt.Errorf("legacy settlement source price changed")
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		receipt, err := d.Blockchain.Recovered460CompanyReceipt(ctx)
+		if err != nil {
+			return err
+		}
+		if !*receipt.Settled {
+			return nil
+		}
+		_, err = d.DB.Exec(`UPDATE blockchain_company_settlements SET status='confirmed',manifest_hash=?,updated_at=NOW() WHERE purchase_intent_id=1 AND status IN ('pending','sealed','skipped')`, receipt.ManifestHash)
+		return err
 	}
 	var rows []struct {
 		blockchain.CommissionInstruction
