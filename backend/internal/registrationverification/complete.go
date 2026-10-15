@@ -116,8 +116,12 @@ func (s *Service) Complete(ctx context.Context, id, token string, now time.Time)
 	if country != 1 {
 		return 0, ErrVerification
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO users (name,email,password,whatsapp_number,binance_pay_id,status,leader_code,executive_code,referred_by,country_id,email_verified_at,created_at,updated_at)
-        VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?,?)`, data.Name, p.Email, passwordHash, data.Whatsapp, data.BinancePayID,
+	userUUID, err := newUUID()
+	if err != nil {
+		return 0, err
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO users (uuid,name,email,password,whatsapp_number,binance_pay_id,status,leader_code,executive_code,referred_by,country_id,email_verified_at,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,'pending',?,?,?,?,?,?,?)`, userUUID, data.Name, p.Email, passwordHash, data.Whatsapp, data.BinancePayID,
 		strings.TrimLeft(data.LeaderCode, "0"), strings.TrimLeft(data.ExecutiveCode, "0"), sponsor, data.CountryID, now.UTC(), now.UTC(), now.UTC())
 	if err != nil {
 		return 0, err
@@ -170,4 +174,16 @@ func (s *Service) Complete(ctx context.Context, id, token string, now time.Time)
 		return 0, err
 	}
 	return uint64(userID), nil
+}
+
+// newUUID returns a random RFC 4122 version-4 UUID for users.uuid.
+func newUUID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	h := hex.EncodeToString(b[:])
+	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:], nil
 }
