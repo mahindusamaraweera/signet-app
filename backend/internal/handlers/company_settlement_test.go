@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"signet-backend/internal/app"
 	"signet-backend/internal/blockchain"
+	"signet-backend/internal/config"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -173,5 +175,34 @@ func TestCompanySettlementExcludesOnlyCorroboratedCompanyAccounting(t *testing.T
 				t.Fatal("required accounting checks were omitted")
 			}
 		})
+	}
+}
+
+func TestRecovered460CompanySettlementAcknowledgesReceiptWithoutManifestOrCommissions(t *testing.T) {
+	for _, settled := range []bool{true, false} {
+		fixture := &commissionSQLFixture{steps: []commissionSQLStep{
+			{contains: "status='completed' AND purchase_kind='first' FOR UPDATE", columns: []string{"id", "user_id", "package_price", "purchase_kind"}, values: []driver.Value{int64(1), int64(460), "1000", "first"}},
+			{contains: "INSERT INTO blockchain_company_settlements", args: []driver.Value{int64(1)}},
+			{contains: "SELECT status FROM blockchain_company_settlements", columns: []string{"status"}, values: []driver.Value{"pending"}},
+		}}
+		if settled {
+			fixture.steps = append(fixture.steps, commissionSQLStep{contains: "SET status='confirmed',manifest_hash=?", args: []driver.Value{strings.Repeat("a", 64)}})
+		}
+		db := sqlx.NewDb(sql.OpenDB(fixture), "commission-fixture")
+		requests := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			if !fixture.committed || r.URL.Path != "/api/v1/integration/package-purchases/company-status" {
+				t.Fatal("financial write route called or source lock not released")
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{"external_user_id": "460", "external_purchase_id": "1", "native_order_id": 5, "package_price_usdt": "1000", "sealed": true, "settled": settled, "manifest_hash": strings.Repeat("a", 64), "settlement_tx_hash": "0x" + strings.Repeat("b", 64), "settlement_usdt": "270.478", "settlement_confirmed_at": "2026-10-15 17:03:25"})
+		}))
+		gateway, _ := blockchain.New(server.URL, "test")
+		err := syncCompanySettlement(&app.Deps{DB: db, Blockchain: gateway, Cfg: &config.Config{AppEnv: "production"}}, 1)
+		server.Close()
+		db.Close()
+		if err != nil || requests != 1 || len(fixture.steps) != 0 {
+			t.Fatalf("receipt reconciliation failed: %v requests=%d remaining=%d", err, requests, len(fixture.steps))
+		}
 	}
 }

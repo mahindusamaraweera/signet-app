@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
 	"github.com/go-chi/chi/v5"
+	"log"
 	"net/http"
 	"regexp"
 	"signet-backend/internal/app"
@@ -67,10 +69,17 @@ func RegisterTierAccountLinkRoutes(r chi.Router, d *app.Deps) {
 			}
 			authorizationURL, err := d.Blockchain.BeginTierLink(r.Context(), userID, state, verifier)
 			if err != nil {
+				log.Printf("tier-link/begin: user %d: %v", userID, err)
+				if errors.Is(err, blockchain.ErrConflict) {
+					httpx.Error(w, 409, "Tier connection needs identity review. Contact support; no balances or vesting have changed.")
+					return
+				}
 				httpx.Error(w, 503, "Tier authorization temporarily unavailable")
 				return
 			}
-			_, err = d.DB.Exec("INSERT INTO tier_account_link_requests (user_id,state_hash,session_hash,verifier_encrypted,expires_at) VALUES (?,?,?,?,?)", userID, blockchain.LinkHash(state), blockchain.LinkHash(cookie.Value), sealed, time.Now().Add(10*time.Minute))
+			// Tier allows 10 minutes to approve, then 5 minutes to return the code.
+			// The local proof must cover both windows; custody enforces each grant expiry.
+			_, err = d.DB.Exec("INSERT INTO tier_account_link_requests (user_id,state_hash,session_hash,verifier_encrypted,expires_at) VALUES (?,?,?,?,?)", userID, blockchain.LinkHash(state), blockchain.LinkHash(cookie.Value), sealed, time.Now().Add(15*time.Minute))
 			if err != nil {
 				httpx.Error(w, 503, "Could not save link request; please start again")
 				return
