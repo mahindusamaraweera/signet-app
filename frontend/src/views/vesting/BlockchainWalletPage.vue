@@ -20,6 +20,8 @@ async function copyAddress() {
 }
 function statusLabel(value) { return String(value || 'Pending').replaceAll('_', ' ') }
 const deposits = ref([])
+const historyLoaded = ref(false)
+const withdrawalsLoaded = ref(false)
 const nextCursor = ref(null)
 const error = ref('')
 const historyError = ref('')
@@ -42,6 +44,7 @@ async function history(older = false) {
   try {
     const { data } = await api.get('/blockchain/deposits', { params: older ? { before_id: nextCursor.value } : {} })
     if (stopped) return
+    historyLoaded.value = true
     deposits.value = older ? [...deposits.value, ...(data.deposits || [])] : data.deposits || []
     nextCursor.value = data.next_before_id
     historyError.value = ''
@@ -55,6 +58,7 @@ async function withdrawalHistory(older = false) {
   try {
     const { data } = await api.get('/blockchain/withdrawals', { params: older ? { before_id: withdrawalCursor.value } : {} })
     if (stopped) return
+    withdrawalsLoaded.value = true
     withdrawals.value = older ? [...withdrawals.value, ...(data.withdrawals || [])] : data.withdrawals || []
     withdrawalCursor.value = data.next_before_id
     withdrawalError.value = ''
@@ -138,9 +142,10 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
     </section>
     </div>
     <section class="card wallet-panel activity-panel">
-    <div class="panel-heading"><h2>Deposit history</h2><span class="small text-muted">{{ deposits.length }} loaded</span></div>
+    <div class="panel-heading"><h2>Deposit history</h2><span class="small text-muted">{{ historyLoaded ? `${deposits.length} loaded` : 'Not loaded' }}</span></div>
     <p v-if="historyError" class="alert alert-warning" role="alert">{{ historyError }}</p>
-    <p v-if="!historyBusy && !historyError && !deposits.length" class="wallet-empty">No deposits yet. Your confirmed transactions will appear here.</p>
+    <p v-if="historyLoaded && !historyBusy && !historyError && !deposits.length" class="wallet-empty">No deposits yet. Your confirmed transactions will appear here.</p>
+    <p v-if="!historyLoaded && !historyBusy" class="wallet-empty" role="status">Deposit history has not loaded. This does not indicate a zero balance.</p>
     <section v-for="deposit in deposits" :key="deposit.id" class="activity-record">
       <div class="activity-record-heading"><strong><AssetAmount :value="deposit.amount" asset="USDT" /></strong><span class="wallet-status" :class="{ settled: ['credited', 'confirmed', 'swept'].includes(deposit.status) }">{{ statusLabel(deposit.status) }}</span></div><p class="small text-muted">{{ deposit.confirmations }} confirmations</p>
       <p class="text-break">Transaction: {{ deposit.tx_hash }} · Log {{ deposit.log_index }}</p>
@@ -152,7 +157,7 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
     <div class="panel-heading"><h2>Withdrawal history</h2><RouterLink to="/wallet/withdraw">Withdraw SIGNET →</RouterLink></div>
     <p class="small text-muted">SIGNET withdrawals pay 97% to the user. The deducted 3% is converted to USDT for the fee address when fee processing is enabled; its confirmation is shown separately below.</p>
     <p v-if="withdrawalError" class="alert alert-warning" role="alert">{{ withdrawalError }}</p>
-    <p v-if="!withdrawalBusy && !withdrawalError && !withdrawals.length" class="wallet-empty">No withdrawals yet. Track your payouts here once requested.</p>
+    <p v-if="withdrawalsLoaded && !withdrawalBusy && !withdrawalError && !withdrawals.length" class="wallet-empty">No withdrawals yet. Track your payouts here once requested.</p>
     <section v-for="withdrawal in withdrawals" :key="withdrawal.id" class="activity-record">
       <div class="activity-record-heading"><strong><AssetAmount :value="withdrawal.net_amount" :asset="withdrawal.asset" /></strong><span class="wallet-status" :class="{ settled: withdrawal.status === 'confirmed' }">{{ statusLabel(withdrawal.status) }}</span></div><p class="small">Gross <AssetAmount :value="withdrawal.amount" :asset="withdrawal.asset" /> · Fee <AssetAmount :value="withdrawal.fee" :asset="withdrawal.asset" /></p>
       <p class="text-break">Destination: {{ withdrawal.to_address }}</p>

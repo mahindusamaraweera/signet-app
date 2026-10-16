@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"signet-backend/internal/app"
 	"signet-backend/internal/auth"
+	"signet-backend/internal/blockchain"
 	"signet-backend/internal/httpx"
 	"strconv"
 	"time"
@@ -139,6 +140,11 @@ func RegisterBlockchainRoutes(r chi.Router, d *app.Deps) {
 		}
 		wallet, err := d.Blockchain.EnsureWallet(r.Context(), auth.UserFromContext(r.Context()).ID)
 		if err != nil {
+			log.Printf("blockchain/wallet: user %d: %v", auth.UserFromContext(r.Context()).ID, err)
+			if errors.Is(err, blockchain.ErrConflict) {
+				httpx.Error(w, http.StatusConflict, "Your wallet identity needs reconciliation. Contact support; do not send another deposit.")
+				return
+			}
 			httpx.Error(w, http.StatusServiceUnavailable, "Deposit wallet temporarily unavailable; please retry")
 			return
 		}
