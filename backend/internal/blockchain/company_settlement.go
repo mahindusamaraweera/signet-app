@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"regexp"
 	"sort"
 )
 
@@ -63,6 +64,43 @@ func (g *Gateway) SealFirstCompanyManifest(ctx context.Context, intent PurchaseI
 	}
 	if result.Enabled == nil || result.Sealed == nil || result.Settled == nil || result.Buyer != fmt.Sprint(intent.UserID) || result.Purchase != fmt.Sprint(intent.ID) || (*result.Enabled && (!*result.Sealed || result.Hash != hash)) || (!*result.Enabled && (*result.Sealed || *result.Settled)) {
 		return nil, ErrUnavailable
+	}
+	return &result, nil
+}
+
+// FirstCompanyReceipt reads existing settlement evidence only; it cannot dispatch a payment.
+type FirstCompanyReceipt struct {
+	Buyer         string `json:"external_user_id"`
+	Purchase      string `json:"external_purchase_id"`
+	NativeOrderID uint64 `json:"native_order_id"`
+	Price         string `json:"package_price_usdt"`
+	Sealed        *bool  `json:"sealed"`
+	Settled       *bool  `json:"settled"`
+	ManifestHash  string `json:"manifest_hash"`
+	TxHash        string `json:"settlement_tx_hash"`
+	USDT          string `json:"settlement_usdt"`
+	ConfirmedAt   string `json:"settlement_confirmed_at"`
+}
+
+func (g *Gateway) Recovered460CompanyReceipt(ctx context.Context) (*FirstCompanyReceipt, error) {
+	var result FirstCompanyReceipt
+	if err := g.request(ctx, "POST", "/api/v1/integration/package-purchases/company-status", "signet-app:first-company-status:1", map[string]string{
+		"source": "signet-app", "external_user_id": "460", "external_purchase_id": "1",
+	}, &result); err != nil {
+		return nil, err
+	}
+	if result.Buyer != "460" || result.Purchase != "1" || result.NativeOrderID != 5 || result.Sealed == nil || result.Settled == nil {
+		return nil, ErrUnavailable
+	}
+	price, ok := new(big.Rat).SetString(result.Price)
+	if !ok || price.Cmp(big.NewRat(1000, 1)) != 0 {
+		return nil, ErrUnavailable
+	}
+	if *result.Settled {
+		amount, valid := new(big.Rat).SetString(result.USDT)
+		if !*result.Sealed || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(result.ManifestHash) || !regexp.MustCompile(`^0x[0-9a-fA-F]{64}$`).MatchString(result.TxHash) || result.ConfirmedAt == "" || !decimalPattern.MatchString(result.USDT) || !valid || amount.Sign() <= 0 {
+			return nil, ErrUnavailable
+		}
 	}
 	return &result, nil
 }

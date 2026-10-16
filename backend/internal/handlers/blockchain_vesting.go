@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"github.com/go-chi/chi/v5"
+	"log"
 	"net/http"
 	"regexp"
 	"signet-backend/internal/app"
@@ -117,6 +118,11 @@ func serveVesting(d *app.Deps, w http.ResponseWriter, r *http.Request, id uint64
 	}
 	response, err := d.Blockchain.Vesting(r.Context(), id)
 	if err != nil {
+		log.Printf("blockchain/vesting: user %d: %v", id, err)
+		if errors.Is(err, blockchain.ErrConflict) {
+			httpx.Error(w, 409, "Your vesting identity needs reconciliation. Contact support; do not reactivate your package or deposit again.")
+			return
+		}
 		httpx.Error(w, 503, "Vesting service temporarily unavailable")
 		return
 	}
