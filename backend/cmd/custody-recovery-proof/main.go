@@ -14,6 +14,7 @@ import (
 )
 
 func main() {
+	wallets := flag.Bool("wallet-identities", false, "export signed confirmed-commission evidence for legacy wallet UUID audit")
 	checkEnv := flag.Bool("check-environment", false, "print loaded environment name and token length only; no DB access or proof")
 	users := flag.String("users", "", "comma-separated production users; discovers each pending purchase and sole eligible deposit")
 	var e handlers.CustodyRecoveryEvidence
@@ -39,6 +40,18 @@ func main() {
 		fail(err)
 	}
 	defer conn.Close()
+	if *wallets {
+		if *users != "" || e.UserID != 0 || e.IntentID != 0 {
+			fail(fmt.Errorf("wallet identity proof cannot be combined with purchase recovery flags"))
+		}
+		proof, err := handlers.LegacyWalletProof(&app.Deps{DB: conn, Cfg: cfg})
+		if err != nil {
+			fail(err)
+		}
+		fmt.Println(string(proof))
+		return
+	}
+
 	if *users != "" {
 		if e.UserID != 0 || e.IntentID != 0 {
 			fail(fmt.Errorf("use --users or --user/--intent"))
