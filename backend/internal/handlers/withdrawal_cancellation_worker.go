@@ -41,8 +41,9 @@ func StartWithdrawalCancellation(d *app.Deps) {
 					}
 					cancel()
 					if err != nil {
-						log.Print("withdrawal cancellation pending; retry or reconciliation required")
-						if _, err := d.DB.Exec(`UPDATE withdrawal_submission_outbox SET attempts=attempts+1,last_error='Cancellation pending; retry or reconciliation required',updated_at=NOW() WHERE authorization_id=? AND status='cancel_requested'`, row.ID); err != nil {
+						diagnostic := withdrawalDiagnostic(err)
+						log.Printf("withdrawal cancellation pending: %s authorization_id=%s", diagnostic, row.ID)
+						if _, err := d.DB.Exec(`UPDATE withdrawal_submission_outbox SET attempts=attempts+1,last_error=?,updated_at=NOW() WHERE authorization_id=? AND status='cancel_requested'`, diagnostic, row.ID); err != nil {
 							log.Print("withdrawal cancellation retry record unavailable")
 						}
 					}
@@ -55,22 +56,22 @@ func StartWithdrawalCancellation(d *app.Deps) {
 func cancelQueuedWithdrawal(ctx context.Context, d *app.Deps, id string, terms withdrawalsecurity.WithdrawalTerms, key []byte) error {
 	assertion, signature, err := d.WithdrawalSecurity.BuildWithdrawalCancellation(ctx, id, terms, key, time.Now().UTC())
 	if err != nil {
-		return err
+		return withdrawalStage("build_cancellation", err)
 	}
 	result, err := d.Blockchain.CancelWithdrawal(ctx, assertion, signature)
 	if err != nil {
 		if errors.Is(err, blockchain.ErrCancellationReviewRequired) {
-			return d.WithdrawalSecurity.RecordWithdrawalCancellationReview(ctx, id, terms, time.Now().UTC())
+			return withdrawalStage("record_cancellation_review", d.WithdrawalSecurity.RecordWithdrawalCancellationReview(ctx, id, terms, time.Now().UTC()))
 		}
-		return err
+		return withdrawalStage("token_cancellation", err)
 	}
 	var remote *uint64
 	if result.WithdrawalID != nil {
 		value, err := strconv.ParseUint(*result.WithdrawalID, 10, 64)
 		if err != nil {
-			return err
+			return withdrawalStage("validate_cancellation_response", err)
 		}
 		remote = &value
 	}
-	return d.WithdrawalSecurity.RecordWithdrawalCancellation(ctx, id, terms, remote, time.Now().UTC())
+	return withdrawalStage("record_cancellation", d.WithdrawalSecurity.RecordWithdrawalCancellation(ctx, id, terms, remote, time.Now().UTC()))
 }
