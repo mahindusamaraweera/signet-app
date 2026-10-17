@@ -41,8 +41,9 @@ func StartWithdrawalSubmission(d *app.Deps) {
 					cancel()
 					if err != nil {
 						// Never persist signatures, assertion contents or remote error bodies.
-						log.Print("withdrawal reservation pending; retry or security review required")
-						if _, recordErr := d.DB.Exec(`UPDATE withdrawal_submission_outbox SET attempts=attempts+1,last_error='Reservation pending; retry or security review required',updated_at=NOW() WHERE authorization_id=? AND status='pending'`, row.ID); recordErr != nil {
+						diagnostic := withdrawalDiagnostic(err)
+						log.Printf("withdrawal reservation pending: %s authorization_id=%s", diagnostic, row.ID)
+						if _, recordErr := d.DB.Exec(`UPDATE withdrawal_submission_outbox SET attempts=attempts+1,last_error=?,updated_at=NOW() WHERE authorization_id=? AND status='pending'`, diagnostic, row.ID); recordErr != nil {
 							log.Print("withdrawal retry record unavailable")
 						}
 					}
@@ -56,15 +57,15 @@ func StartWithdrawalSubmission(d *app.Deps) {
 func submitQueuedWithdrawal(ctx context.Context, d *app.Deps, id string, terms withdrawalsecurity.WithdrawalTerms, key []byte) error {
 	a, signature, err := d.WithdrawalSecurity.BuildQueuedWithdrawalAssertion(ctx, id, terms, key, time.Now().UTC())
 	if err != nil {
-		return err
+		return withdrawalStage("build_assertion", err)
 	}
 	remote, err := d.Blockchain.ReserveWithdrawal(ctx, a, signature)
 	if err != nil {
-		return err
+		return withdrawalStage("token_reservation", err)
 	}
 	remoteID, err := strconv.ParseUint(remote.ID, 10, 64)
 	if err != nil {
-		return err
+		return withdrawalStage("validate_response", err)
 	}
-	return d.WithdrawalSecurity.RecordWithdrawalReservation(ctx, id, terms, remoteID, time.Now().UTC())
+	return withdrawalStage("record_reservation", d.WithdrawalSecurity.RecordWithdrawalReservation(ctx, id, terms, remoteID, time.Now().UTC()))
 }
