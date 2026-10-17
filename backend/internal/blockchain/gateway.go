@@ -175,13 +175,13 @@ func (g *Gateway) request(ctx context.Context, method, path, key string, body in
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusUnprocessableEntity {
-		return fmt.Errorf("%w: %s %s: HTTP 422: %s", ErrRejected, method, path, errorSnippet(res.Body))
+		return requestFailure(res, ErrRejected, method, path)
 	}
 	if res.StatusCode == http.StatusConflict {
-		return fmt.Errorf("%w: %s %s: HTTP 409: %s", errors.Join(ErrUnavailable, ErrConflict), method, path, errorSnippet(res.Body))
+		return requestFailure(res, errors.Join(ErrUnavailable, ErrConflict), method, path)
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("%w (HTTP %d): %s %s: %s", ErrUnavailable, res.StatusCode, method, path, errorSnippet(res.Body))
+		return requestFailure(res, ErrUnavailable, method, path)
 	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, 65537))
 	if err != nil {
