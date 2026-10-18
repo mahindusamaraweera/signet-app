@@ -1,13 +1,31 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import api from '@/api/client'
+import { assetDisplay } from '@/utils/assetDisplay'
+import { canCancelRequest } from '@/utils/withdrawalDisplay'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
 
 const security = ref(null), addresses = ref([]), requests = ref([])
 const amount = ref(''), addressId = ref(''), password = ref(''), emailCode = ref(''), authCode = ref('')
 const prepared = ref(null), challenge = ref(''), stage = ref('draft'), busy = ref(false)
+const historyError = ref('')
 const error = ref(''), message = ref(''), uncertain = ref(false)
 const cancelTarget = ref(null), cancelPassword = ref(''), cancelAcknowledged = ref(false)
+const cancelDialog = ref(null), cancelInput = ref(null)
+let returnFocus = null
+watch(cancelTarget, async target => {
+  await nextTick()
+  if (target) {
+    returnFocus = document.activeElement
+    cancelDialog.value?.showModal()
+    cancelInput.value?.focus()
+  } else {
+    cancelDialog.value?.close()
+    cancelPassword.value = ''; cancelAcknowledged.value = false
+    returnFocus?.focus()
+  }
+})
+function closeCancellation() { if (!busy.value) cancelTarget.value = null }
 let stopped = false
 const enabled = computed(() => security.value?.withdrawal_submission_enabled === true)
 const activeAddresses = computed(() => addresses.value.filter(a => !a.revoked_at && Date.parse(a.eligible_at) <= Date.now()))
@@ -18,7 +36,17 @@ function clearProof() { prepared.value = null; challenge.value = ''; emailCode.v
 async function requestStatus() {
   const { data } = await api.get('/blockchain/withdrawals/requests')
   if (stopped) return
-  requests.value = data.requests || []
+  requests.value = (data.requests || []).map(r => ({ ...r, payout: null }))
+  historyError.value = ''
+  try {
+    const { data: history } = await api.get('/blockchain/withdrawals')
+    if (stopped) return
+    const payouts = new Map((history.withdrawals || []).map(p => [String(p.id), p]))
+    requests.value = requests.value.map(r => ({ ...r, payout: payouts.get(String(r.remote_withdrawal_id)) || null }))
+  } catch {
+    if (stopped) return
+    historyError.value = 'Payout status unavailable. Check payout history before taking further action.'
+  }
   if (prepared.value) {
     const row = requests.value.find(r => r.id === prepared.value.id)
     if (row?.queue_status === 'pending' || row?.queue_status === 'submitted') {
@@ -97,8 +125,8 @@ onBeforeUnmount(() => { stopped = true; clearProof(); cancelPassword.value = '';
 <template>
   <DashboardLayout><div class="wallet-form-page">
     <h1>Withdraw SIGNET</h1>
-    <p>You receive 97% in SIGNET. The deducted 3% is converted to USDT and paid to the withdrawal-fee address. No second fee is charged.</p>
-    <p><RouterLink to="/wallet/security">Set up email, Authenticator and withdrawal address</RouterLink> · <RouterLink to="/wallet/deposits">Payout and fee history</RouterLink></p>
+    <p>Withdraw to your verified BSC address. A 3% fee is included in your requested amount; you receive 97%.</p>
+    <p><RouterLink to="/wallet/security">Set up email, Authenticator and withdrawal address</RouterLink> · <RouterLink to="/wallet/deposits">Withdrawal history</RouterLink></p>
     <p v-if="!enabled" class="alert alert-warning">Withdrawal submission is not enabled. Your records remain available below.</p>
     <p v-if="error" role="alert" class="alert alert-danger">{{ error }}</p><p v-if="message" role="status" class="alert alert-info">{{ message }}</p>
     <button class="btn btn-outline-secondary mb-3" :disabled="busy" @click="refresh">Check status</button>
@@ -116,18 +144,57 @@ onBeforeUnmount(() => { stopped = true; clearProof(); cancelPassword.value = '';
       </template>
       <button v-else-if="stage === 'authorized'" class="btn btn-primary" :disabled="busy || uncertain || !password" @click="act('queue')">Queue approved withdrawal</button>
     </section>
-    <h2 class="h5 mt-4">Recent withdrawal requests</h2><p>Queued means awaiting custody processing; submitted means reserved remotely, not paid. Use payout history for chain and fee confirmation. Reloading clears your approval proof, not financial records.</p>
+    <h2 class="h5 mt-4">Recent withdrawal requests</h2><p>Payout status comes from custody. Submitted means reserved, awaiting processing. Older payouts are available in payout and fee history.</p>
+    <p v-if="historyError" role="status" class="alert alert-warning">{{ historyError }}</p>
     <p v-if="!busy && !error && !requests.length" class="wallet-empty">No withdrawal requests yet.</p>
-    <ul class="list-group"><li v-for="r in requests" :key="r.id" class="list-group-item text-break">{{ r.terms.gross }} SIGNET → {{ r.terms.destination }}<br>{{ r.authorization_status }}<span v-if="r.queue_status"> / {{ r.queue_status }}</span><span v-if="r.remote_withdrawal_id"> · Custody request {{ r.remote_withdrawal_id }}</span>
-      <p v-if="r.queue_status === 'cancellation_review_required'" class="text-danger">Cancellation requires reconciliation. Check payout history and contact support; no refund is confirmed.</p>
-      <button v-if="cancellationEnabled && ['pending', 'authorized', 'consumed', 'expired'].includes(r.authorization_status) && !['cancel_requested', 'cancelled', 'cancellation_review_required'].includes(r.queue_status)" class="btn btn-outline-danger ms-2" :disabled="busy" @click="cancelTarget = r; cancelPassword = ''; cancelAcknowledged = false">Request cancellation</button>
-    </li></ul>
-    <section v-if="cancelTarget" class="card p-3 mt-3">
-      <h2>Confirm cancellation request</h2><p class="text-break">{{ cancelTarget.terms.gross }} SIGNET → {{ cancelTarget.terms.destination }}</p>
+    <div class="withdrawal-list">
+      <article v-for="r in requests" :key="r.id" class="withdrawal-record">
+        <div class="withdrawal-heading">
+          <strong>{{ assetDisplay(r.payout?.net_amount || r.terms.net, 'SIGNET') }} <small>SIGNET</small></strong>
+          <span class="withdrawal-badge" :class="{ completed: r.payout?.status === 'completed' }">{{ r.payout?.status?.replaceAll('_', ' ') || (r.queue_status || r.authorization_status).replaceAll('_', ' ') }}</span>
+        </div>
+        <p class="small mb-2">Requested {{ assetDisplay(r.terms.gross, 'SIGNET') }} · Fee {{ assetDisplay(r.terms.fee, 'SIGNET') }} SIGNET</p>
+        <p v-if="r.remote_withdrawal_id && !r.payout" class="small">Payout status not loaded. Check withdrawal history before trying again.</p>
+        <p v-if="r.queue_status === 'cancellation_review_required'" class="text-warning small">Cancellation needs review. Contact support; a refund is not confirmed.</p>
+        <details><summary>Withdrawal details<span v-if="r.remote_withdrawal_id"> · #{{ r.remote_withdrawal_id }}</span></summary>
+          <p class="text-break mt-2 mb-1">To: {{ r.terms.destination }}</p>
+          <p v-if="r.payout?.completed_at" class="small mb-1">Completed: {{ new Date(r.payout.completed_at).toLocaleString() }}</p>
+          <a v-if="/^0x[a-fA-F0-9]{64}$/.test(r.payout?.tx_hash || '')" :href="'https://bscscan.com/tx/' + r.payout.tx_hash" target="_blank" rel="noopener noreferrer">View transaction ↗</a>
+          <p v-else class="small mb-0">No payout transaction recorded.</p>
+        </details>
+        <button v-if="cancellationEnabled && canCancelRequest(r)" class="btn btn-outline-danger btn-sm mt-3" :disabled="busy" @click="error = ''; cancelTarget = r; cancelPassword = ''; cancelAcknowledged = false">Request cancellation</button>
+      </article>
+    </div>
+    <Teleport to="body">
+    <dialog ref="cancelDialog" class="withdrawal-dialog" aria-labelledby="cancel-title" @cancel.prevent="closeCancellation" @click="e => { if (e.target === cancelDialog) closeCancellation() }">
+    <section v-if="cancelTarget">
+
+      <div class="withdrawal-heading mb-3"><h2 id="cancel-title">Cancel withdrawal?</h2><button type="button" class="btn btn-outline-secondary btn-sm" aria-label="Close cancellation" :disabled="busy" @click="closeCancellation">✕</button></div><p class="text-break">{{ assetDisplay(cancelTarget.terms.gross, 'SIGNET') }} SIGNET → {{ cancelTarget.terms.destination }}</p>
       <p>Cancellation is possible only before payout starts. A pending cancellation is not a confirmed refund.</p>
-      <label for="cancel-password">Current password</label><input id="cancel-password" v-model="cancelPassword" type="password" autocomplete="current-password" maxlength="72" class="form-control mb-3" :disabled="busy" />
+      <p v-if="error" role="alert" class="alert alert-danger">{{ error }}</p>
+      <label for="cancel-password">Current password</label><input ref="cancelInput" id="cancel-password" v-model="cancelPassword" type="password" autocomplete="current-password" maxlength="72" class="form-control mb-3" :disabled="busy" />
       <label><input v-model="cancelAcknowledged" type="checkbox" :disabled="busy" /> I want to cancel this exact request.</label>
       <div class="mt-3"><button class="btn btn-danger" :disabled="busy || !cancelPassword || !cancelAcknowledged" @click="cancelRequest">Request cancellation</button><button class="btn btn-outline-secondary ms-2" :disabled="busy" @click="cancelTarget = null; cancelPassword = ''; cancelAcknowledged = false">Keep request</button></div>
     </section>
+    </dialog>
+    </Teleport>
   </div></DashboardLayout>
 </template>
+
+<style scoped>
+.wallet-form-page { max-width: 880px; margin-inline: auto; }
+.withdrawal-list { display: grid; gap: 12px; }
+.withdrawal-record { padding: 18px; border: 1px solid #29434c; border-radius: 16px; background: #0b1921; }
+.withdrawal-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.withdrawal-heading strong { font-size: 1.25rem; }
+.withdrawal-heading small { font-size: .75rem; color: #a9c0ca; }
+.withdrawal-badge { font-size: .8rem; text-transform: capitalize; padding: 4px 10px; border-radius: 20px; background: #29323a; }
+.withdrawal-badge.completed { background: #123e32; color: #66e5b7; }
+.withdrawal-record p { color: #afc4cc; }
+.withdrawal-record summary { cursor: pointer; color: #6bdded; font-size: .9rem; }
+.withdrawal-dialog { width: min(480px, calc(100% - 24px)); max-height: calc(100dvh - 32px); overflow-y: auto; margin: auto; padding: 24px; border: 1px solid #385a64; border-radius: 20px; background: #0b1921; color: #e5f2f5; box-shadow: 0 24px 80px #0009; }
+.withdrawal-dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
+.withdrawal-dialog h2 { font-size: 1.3rem; margin: 0; }
+.withdrawal-dialog .text-break { font-size: .9rem; }
+@media (max-width: 576px) { .withdrawal-record { padding: 14px; } .withdrawal-dialog { padding: 18px; } }
+</style>

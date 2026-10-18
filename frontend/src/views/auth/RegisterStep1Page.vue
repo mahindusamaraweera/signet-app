@@ -11,6 +11,7 @@ import RegistrationProgress from '@/components/RegistrationProgress.vue'
 
 const route = useRoute()
 const router = useRouter()
+const preview = import.meta.env.DEV && route.query.preview === 'sample'
 
 const loading = ref(true)
 const loadError = ref('')
@@ -258,6 +259,14 @@ const dialCodes = [
 ]
 
 onMounted(async () => {
+  if (preview) {
+    form.referral_code = 'SAMPLE-REFERRAL'
+    blockchainEnabled.value = true
+    countries.value = [{ id: 1, code: 'LK', name: 'Sri Lanka' }, { id: 2, code: 'AE', name: 'United Arab Emirates' }]
+    leaders.value = [{ id: 1, signet_id: 'SAMPLE-001', name: 'Sample Manager' }, { id: 2, signet_id: 'SAMPLE-002', name: 'Sample Executive' }]
+    loading.value = false
+    return
+  }
   form.referral_code = route.query.ref || ''
   try {
     const { data } = await api.get('/register/referral', { params: { ref: form.referral_code } })
@@ -292,6 +301,7 @@ function checkDuplicateSelection(changed) {
 }
 
 async function onSubmit() {
+  if (preview) return
   errors.value = {}
   formError.value = ''
   submitting.value = true
@@ -335,6 +345,7 @@ async function onSubmit() {
               </RouterLink>
             </div>
 
+            <p v-if="preview" class="alert alert-info" role="status">Local sample preview. Registration and verification emails are disabled.</p>
             <div v-if="loading" class="card border-0 shadow-lg rounded-4 overflow-hidden p-5 text-center text-muted">Loading&hellip;</div>
 
             <div v-else-if="loadError" class="card border-0 shadow-lg rounded-4 overflow-hidden p-4">
@@ -443,7 +454,7 @@ async function onSubmit() {
                   </div>
                 </div>
 
-                <button type="submit" class="btn btn-primary btn-lg w-100 rounded-3 fw-semibold py-3" :disabled="submitting">
+                <button type="submit" class="btn btn-primary btn-lg w-100 rounded-3 fw-semibold py-3" :disabled="submitting || preview">
                   {{ submitting ? 'Submitting…' : 'Send verification email' }}
                 </button>
               </form>
