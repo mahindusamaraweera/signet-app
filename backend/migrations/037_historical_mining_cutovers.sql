@@ -1,0 +1,10 @@
+CREATE TABLE historical_mining_cutovers (
+  user_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  mining_id BIGINT UNSIGNED NOT NULL UNIQUE,
+  batch_id VARCHAR(64) NOT NULL,
+  corrected_total VARCHAR(64) NOT NULL,
+  snapshot_json LONGTEXT NOT NULL,
+  snapshot_sha256 CHAR(64) NOT NULL,
+  cutover_at VARCHAR(32) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
