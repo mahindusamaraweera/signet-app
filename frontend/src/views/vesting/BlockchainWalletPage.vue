@@ -155,19 +155,16 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
     </section>
     <section class="card wallet-panel activity-panel">
     <div class="panel-heading"><h2>Withdrawal history</h2><RouterLink to="/wallet/withdraw">Withdraw SIGNET →</RouterLink></div>
-    <p class="small text-muted">SIGNET withdrawals pay 97% to the user. The deducted 3% is converted to USDT for the fee address when fee processing is enabled; its confirmation is shown separately below.</p>
+    <p class="small text-muted">Your withdrawals include a 3% fee. The amount below is the SIGNET sent to your address.</p>
     <p v-if="withdrawalError" class="alert alert-warning" role="alert">{{ withdrawalError }}</p>
     <p v-if="withdrawalsLoaded && !withdrawalBusy && !withdrawalError && !withdrawals.length" class="wallet-empty">No withdrawals yet. Track your payouts here once requested.</p>
     <section v-for="withdrawal in withdrawals" :key="withdrawal.id" class="activity-record">
-      <div class="activity-record-heading"><strong><AssetAmount :value="withdrawal.net_amount" :asset="withdrawal.asset" /></strong><span class="wallet-status" :class="{ settled: withdrawal.status === 'confirmed' }">{{ statusLabel(withdrawal.status) }}</span></div><p class="small">Gross <AssetAmount :value="withdrawal.amount" :asset="withdrawal.asset" /> · Fee <AssetAmount :value="withdrawal.fee" :asset="withdrawal.asset" /></p>
-      <p class="text-break">Destination: {{ withdrawal.to_address }}</p>
-      <p class="text-break mb-0">{{ withdrawal.tx_hash ? `Transaction: ${withdrawal.tx_hash}` : 'No transaction hash recorded yet.' }}</p>
-      <div v-if="withdrawal.fee_payment" class="small mt-2">
-        <p class="mb-1">Fee conversion: {{ statusLabel(withdrawal.fee_payment.status) }} · <AssetAmount :value="withdrawal.fee_payment.signet_amount" asset="SIGNET" /> · <span v-if="withdrawal.fee_payment.received_usdt == null">USDT receipt not confirmed</span><span v-else><AssetAmount :value="withdrawal.fee_payment.received_usdt" asset="USDT" /> received</span></p>
-        <p class="text-break mb-1">Fee destination: {{ withdrawal.fee_payment.to_address }}</p>
-        <p class="text-break mb-0">{{ withdrawal.fee_payment.tx_hash ? `Fee transaction: ${withdrawal.fee_payment.tx_hash}` : 'Fee transaction not submitted yet.' }}</p>
-      </div>
-      <p v-else class="small mt-2 mb-0">No separate fee-conversion record is available for this withdrawal.</p>
+      <div class="activity-record-heading"><strong><AssetAmount :value="withdrawal.net_amount" :asset="withdrawal.asset" /></strong><span class="wallet-status" :class="{ settled: ['confirmed', 'completed'].includes(withdrawal.status) }">{{ statusLabel(withdrawal.status) }}</span></div><p class="small">Gross <AssetAmount :value="withdrawal.amount" :asset="withdrawal.asset" /> · Fee <AssetAmount :value="withdrawal.fee" :asset="withdrawal.asset" /></p>
+      <details><summary>Withdrawal details</summary>
+        <p class="text-break mt-2 mb-1">To: {{ withdrawal.to_address }}</p>
+        <a v-if="/^0x[a-fA-F0-9]{64}$/.test(withdrawal.tx_hash || '')" :href="'https://bscscan.com/tx/' + withdrawal.tx_hash" target="_blank" rel="noopener noreferrer">View transaction ↗</a>
+        <p v-else class="small mb-0">No payout transaction recorded.</p>
+      </details>
     </section>
     <button v-if="withdrawalCursor" class="btn btn-secondary" :disabled="withdrawalBusy || busy" @click="withdrawalHistory(true)">Load older withdrawals</button>
     </section>
