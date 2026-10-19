@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import api from '@/api/client'
 import { verifyAndQueueWithdrawal } from '@/utils/withdrawalSubmission'
 import { assetDisplay } from '@/utils/assetDisplay'
-import { canCancelRequest } from '@/utils/withdrawalDisplay'
+import { canCancelRequest, withdrawalRequestNotice } from '@/utils/withdrawalDisplay'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
 
 const security = ref(null), addresses = ref([]), requests = ref([])
@@ -154,7 +154,7 @@ onBeforeUnmount(() => { stopped = true; clearProof(); cancelPassword.value = '';
       </template>
       <button v-else-if="stage === 'authorized'" class="btn btn-primary" :disabled="busy || uncertain || !password" @click="act('queue')">Submit approved withdrawal</button>
     </section>
-    <h2 class="h5 mt-4">Recent withdrawal requests</h2><p>Payout status comes from custody. Submitted means reserved, awaiting processing. Older payouts are available in payout and fee history.</p>
+    <h2 class="h5 mt-4">Recent withdrawal requests</h2><p>Payout status comes from custody. Submitted means reserved, awaiting processing. Older payouts are available in withdrawal history.</p>
     <p v-if="historyError" role="status" class="alert alert-warning">{{ historyError }}</p>
     <p v-if="!busy && !error && !requests.length" class="wallet-empty">No withdrawal requests yet.</p>
     <div class="withdrawal-list">
@@ -164,6 +164,7 @@ onBeforeUnmount(() => { stopped = true; clearProof(); cancelPassword.value = '';
           <span class="withdrawal-badge" :class="{ completed: r.payout?.status === 'completed' }">{{ r.payout?.status?.replaceAll('_', ' ') || (r.queue_status || r.authorization_status).replaceAll('_', ' ') }}</span>
         </div>
         <p class="small mb-2">Requested {{ assetDisplay(r.terms.gross, 'SIGNET') }} · Fee {{ assetDisplay(r.terms.fee, 'SIGNET') }} SIGNET</p>
+        <p v-if="withdrawalRequestNotice(r)" class="small">{{ withdrawalRequestNotice(r) }}</p>
         <p v-if="r.remote_withdrawal_id && !r.payout" class="small">Payout status not loaded. Check withdrawal history before trying again.</p>
         <p v-if="r.queue_status === 'cancellation_review_required'" class="text-warning small">Cancellation needs review. Contact support; a refund is not confirmed.</p>
         <details><summary>Withdrawal details<span v-if="r.remote_withdrawal_id"> · #{{ r.remote_withdrawal_id }}</span></summary>

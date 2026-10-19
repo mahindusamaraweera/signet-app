@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"signet-backend/internal/app"
 	"signet-backend/internal/auth"
@@ -47,7 +48,9 @@ func withdrawalRequestHandler(d *app.Deps, action string) http.HandlerFunc {
 		if action == "prepare" {
 			prepared, err := d.WithdrawalSecurity.PrepareWithdrawal(r.Context(), user.ID, body.Password, body.AddressID, body.Amount, now)
 			if err != nil {
-				httpx.Error(w, 409, "Withdrawal security, address or waiting period requires attention")
+				code, message := withdrawalConfirmationError(err)
+				log.Printf("withdrawal verification rejected: stage=%s user_id=%d code=%s", action, user.ID, code)
+				httpx.JSON(w, 409, map[string]string{"message": message, "code": code})
 				return
 			}
 			httpx.JSON(w, 200, prepared)
@@ -69,6 +72,7 @@ func withdrawalRequestHandler(d *app.Deps, action string) http.HandlerFunc {
 		case "confirm":
 			if err := d.WithdrawalSecurity.ConfirmWithdrawal(r.Context(), user.ID, body.Password, body.ID, body.Proof, body.Terms, body.ChallengeID, body.EmailCode, body.AuthenticatorCode, now); err != nil {
 				code, message := withdrawalConfirmationError(err)
+				log.Printf("withdrawal verification rejected: stage=%s user_id=%d code=%s", action, user.ID, code)
 				httpx.JSON(w, 409, map[string]string{"message": message, "code": code})
 				return
 			}
@@ -89,7 +93,13 @@ func withdrawalRequestHandler(d *app.Deps, action string) http.HandlerFunc {
 
 // Only fixed diagnostics are returned; database errors and secrets stay private.
 func withdrawalConfirmationError(err error) (string, string) {
+	var eligibility *withdrawalsecurity.EligibilityError
+	if errors.As(err, &eligibility) {
+		return eligibility.Code, eligibility.Message
+	}
 	switch {
+	case errors.Is(err, withdrawalsecurity.ErrChallengeCooldown):
+		return "withdrawal_request_cooldown", "Too many recent requests. Wait one minute before requesting another verification email or starting a new withdrawal."
 	case errors.Is(err, withdrawalsecurity.ErrWithdrawalExpired):
 		return "withdrawal_request_expired", "This withdrawal request expired. Start a new withdrawal and use the new verification email."
 	case errors.Is(err, withdrawalsecurity.ErrWithdrawalEmailExpired):
