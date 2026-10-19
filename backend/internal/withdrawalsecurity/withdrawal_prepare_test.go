@@ -18,7 +18,7 @@ func TestWithdrawalPreparationRejectsFrozenHeldOrUnverifiedAccounts(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"frozen", "hold", "email changed", "authenticator unconfirmed"} {
+	for _, scenario := range []string{"frozen", "hold", "email changed", "authenticator unconfirmed", "wrong password", "missing profile"} {
 		t.Run(scenario, func(t *testing.T) {
 			now := time.Unix(1800000000, 0).UTC()
 			verified := "user@example.com"
@@ -41,13 +41,28 @@ func TestWithdrawalPreparationRejectsFrozenHeldOrUnverifiedAccounts(t *testing.T
 				{match: "SELECT email,password,google_authenticator_secret", values: []driver.Value{"user@example.com", password, nil}},
 				{match: "FROM withdrawal_security_profiles", values: []driver.Value{verified, now, nil, confirmed, frozen, int64(2), hold}},
 			}}
+			if scenario == "wrong password" {
+				fixture.steps = fixture.steps[:1]
+			}
+			if scenario == "missing profile" {
+				fixture.steps[1].err = sql.ErrNoRows
+			}
 			db := sql.OpenDB(fixture)
 			defer db.Close()
 			s, err := NewService(db, []byte(strings.Repeat("k", 32)))
 			if err != nil {
 				t.Fatal(err)
 			}
-			prepared, err := s.PrepareWithdrawal(context.Background(), 42, "test-password", strings.Repeat("a", 64), "100", now)
+			inputPassword := "test-password"
+			if scenario == "wrong password" {
+				inputPassword = "wrong-password"
+			}
+			prepared, err := s.PrepareWithdrawal(context.Background(), 42, inputPassword, strings.Repeat("a", 64), "100", now)
+			codes := map[string]string{"frozen": "withdrawal_account_frozen", "hold": "withdrawal_security_wait", "email changed": "withdrawal_email_verification_required", "authenticator unconfirmed": "withdrawal_authenticator_setup_required", "wrong password": "withdrawal_password_incorrect", "missing profile": "withdrawal_security_setup_required"}
+			var diagnostic *EligibilityError
+			if !errors.As(err, &diagnostic) || diagnostic.Code != codes[scenario] {
+				t.Fatalf("wrong preparation diagnostic: %v", err)
+			}
 			if err == nil || prepared.ID != "" || prepared.Proof != "" || fixture.committed || !fixture.rolledBack || len(fixture.steps) != 0 {
 				t.Fatal("ineligible preparation persisted or returned proof")
 			}
@@ -60,7 +75,7 @@ func TestWithdrawalPreparationStoresCanonicalTermsAndRollsBackFailures(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"success", "revoked address", "address wait", "quota", "insert failure", "audit failure"} {
+	for _, scenario := range []string{"success", "revoked address", "address wait", "quota", "insert failure", "audit failure", "already pending"} {
 		t.Run(scenario, func(t *testing.T) {
 			key := []byte(strings.Repeat("k", 32))
 			now := time.Unix(1800000000, 0).UTC()
@@ -96,6 +111,7 @@ func TestWithdrawalPreparationStoresCanonicalTermsAndRollsBackFailures(t *testin
 				if scenario == "quota" {
 					count = 5
 				}
+				fixture.steps = append(fixture.steps, sqlStep{match: "SELECT COUNT(*) FROM withdrawal_submission_outbox", values: []driver.Value{int64(0)}})
 				fixture.steps = append(fixture.steps, sqlStep{match: "SELECT COUNT(*) FROM withdrawal_authorizations", values: []driver.Value{count}})
 				if count == 0 {
 					insert := sqlStep{match: "INSERT INTO withdrawal_authorizations", check: func(args []driver.NamedValue) error {
@@ -127,6 +143,16 @@ func TestWithdrawalPreparationStoresCanonicalTermsAndRollsBackFailures(t *testin
 					}
 				}
 			}
+			if scenario == "already pending" {
+				for i, step := range fixture.steps {
+					if step.match == "SELECT COUNT(*) FROM withdrawal_submission_outbox" {
+						fixture.steps = fixture.steps[:i+1]
+						fixture.steps[i].values = []driver.Value{int64(1)}
+						break
+					}
+				}
+			}
+
 			db := sql.OpenDB(fixture)
 			defer db.Close()
 			s, err := NewService(db, key)
