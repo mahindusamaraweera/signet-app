@@ -105,7 +105,13 @@ func loadOwner(ctx context.Context, tx *sqlx.Tx, p Profile) error {
 	if err := tx.GetContext(ctx, &up, "SELECT user_id,package,status,sale,CAST(activated_at AS CHAR) AS activated FROM user_packages WHERE id=? FOR UPDATE", p.PackageRecord); err != nil {
 		return err
 	}
-	if up.UserID != p.UserID || up.Package != p.PackageID || up.Status != "active" || up.Sale != "first" || up.Activated != p.Activated {
+	// Profiles preserve operator-reviewed Colombo wall times for the signed proof.
+	// MySQLDSN pins this connection to UTC, including TIMESTAMP-to-CHAR reads.
+	expectedActivation, err := time.ParseInLocation("2006-01-02 15:04:05", p.Activated, time.FixedZone("Asia/Colombo", 19800))
+	if err != nil {
+		return fmt.Errorf("user %d invalid reviewed activation timestamp", p.UserID)
+	}
+	if up.UserID != p.UserID || up.Package != p.PackageID || up.Status != "active" || up.Sale != "first" || up.Activated != expectedActivation.UTC().Format("2006-01-02 15:04:05") {
 		return fmt.Errorf("user %d package evidence changed", p.UserID)
 	}
 	return nil
