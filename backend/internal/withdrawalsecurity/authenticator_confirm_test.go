@@ -17,7 +17,7 @@ func TestAuthenticatorConfirmationTransactionBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"success", "wrong code", "changed version", "expired", "profile failure", "audit failure"} {
+	for _, scenario := range []string{"success", "success short hold", "wrong code", "changed version", "expired", "profile failure", "audit failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			key := []byte(strings.Repeat("k", 32))
 			now := time.Unix(59, 0).UTC()
@@ -29,6 +29,11 @@ func TestAuthenticatorConfirmationTransactionBoundaries(t *testing.T) {
 			version := int64(1)
 			expires := now.Add(10 * time.Minute)
 			hold := now.Add(72 * time.Hour)
+			expectedHold := hold
+			if scenario == "success short hold" {
+				hold = now.Add(time.Hour)
+				expectedHold = now.Add(24 * time.Hour)
+			}
 			if scenario == "changed version" {
 				version = 2
 			}
@@ -45,7 +50,7 @@ func TestAuthenticatorConfirmationTransactionBoundaries(t *testing.T) {
 				if scenario != "wrong code" {
 					fixture.steps = append(fixture.steps, sqlStep{match: "INSERT INTO withdrawal_totp_counters"}, sqlStep{match: "SET last_counter = ?"})
 					profile := sqlStep{match: "SET authenticator_fingerprint=?", check: func(args []driver.NamedValue) error {
-						if args[0].Value != secretFingerprint(key, secret) || args[2].Value != hold {
+						if args[0].Value != secretFingerprint(key, secret) || args[2].Value != expectedHold {
 							return errors.New("fingerprint or longer hold changed")
 						}
 						return nil
@@ -54,7 +59,7 @@ func TestAuthenticatorConfirmationTransactionBoundaries(t *testing.T) {
 						profile.err = errors.New("profile update failed")
 					}
 					fixture.steps = append(fixture.steps, profile)
-					if scenario == "success" || scenario == "audit failure" {
+					if scenario == "success" || scenario == "success short hold" || scenario == "audit failure" {
 						fixture.steps = append(fixture.steps, sqlStep{match: "SET confirmed_at=?"})
 						audit := sqlStep{match: "INSERT INTO withdrawal_security_audit", check: func(args []driver.NamedValue) error {
 							if args[0].Value != int64(42) || args[1].Value != "authenticator_confirmed" || args[2].Value != securityChangeReference(42, 2, "authenticator_confirmed") || args[3].Value != int64(2) {
@@ -80,7 +85,7 @@ func TestAuthenticatorConfirmationTransactionBoundaries(t *testing.T) {
 				code = "000000"
 			}
 			err = service.ConfirmAuthenticator(context.Background(), 42, "test-password", code, now)
-			if scenario == "success" {
+			if scenario == "success" || scenario == "success short hold" {
 				if err != nil || !fixture.committed || fixture.rolledBack {
 					t.Fatalf("confirmation failed: %v", err)
 				}
