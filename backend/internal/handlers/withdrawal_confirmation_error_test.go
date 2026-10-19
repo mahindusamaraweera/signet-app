@@ -12,6 +12,8 @@ func TestWithdrawalConfirmationDiagnostics(t *testing.T) {
 		err  error
 		code string
 	}{
+		{withdrawalsecurity.ErrWithdrawalEmailDelivery, "withdrawal_email_delivery_failed"},
+		{withdrawalsecurity.ErrChallengeCooldown, "withdrawal_request_cooldown"},
 		{withdrawalsecurity.ErrWithdrawalExpired, "withdrawal_request_expired"},
 		{withdrawalsecurity.ErrWithdrawalEmailExpired, "withdrawal_email_expired"},
 		{withdrawalsecurity.ErrWithdrawalEmailIncorrect, "withdrawal_email_incorrect"},

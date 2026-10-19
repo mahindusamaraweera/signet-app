@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+var ErrWithdrawalEmailDelivery = errors.New("withdrawal email delivery failed")
+
 func (s *Service) IssueWithdrawalEmail(ctx context.Context, userID uint64, password, id, proof string, expected WithdrawalTerms, now time.Time, mailer Mailer) (string, error) {
 	if userID == 0 || expected.UserID != userID || !challengeIDPattern.MatchString(id) || !challengeIDPattern.MatchString(proof) || mailer == nil {
 		return "", ErrWithdrawalAuthorization
@@ -25,8 +27,11 @@ func (s *Service) IssueWithdrawalEmail(ctx context.Context, userID uint64, passw
 	if err != nil {
 		return "", err
 	}
-	if a.Terms != expected || a.Status != "pending" || !now.Before(a.ExpiresAt) || !hmac.Equal([]byte(a.ProofHash), []byte(a.hash(s.key, proof))) {
+	if a.Terms != expected || a.Status != "pending" || !hmac.Equal([]byte(a.ProofHash), []byte(a.hash(s.key, proof))) {
 		return "", ErrWithdrawalAuthorization
+	}
+	if !now.Before(a.ExpiresAt) {
+		return "", ErrWithdrawalExpired
 	}
 	var recent, hourly int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM withdrawal_security_challenges WHERE user_id=? AND purpose=? AND created_at>=?`, userID, WithdrawalPurpose, now.UTC().Add(-time.Minute)).Scan(&recent); err != nil {
@@ -72,7 +77,7 @@ func (s *Service) IssueWithdrawalEmail(ctx context.Context, userID uint64, passw
 		return "", ErrInvalidChallenge
 	}
 	if deliveryErr != nil {
-		return "", errors.New("withdrawal email delivery failed")
+		return "", ErrWithdrawalEmailDelivery
 	}
 	return c.ID, nil
 }

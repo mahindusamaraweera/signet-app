@@ -64,7 +64,9 @@ func withdrawalRequestHandler(d *app.Deps, action string) http.HandlerFunc {
 		case "email":
 			id, err := d.WithdrawalSecurity.IssueWithdrawalEmail(r.Context(), user.ID, body.Password, body.ID, body.Proof, body.Terms, now, securitymail.New(d.Cfg))
 			if err != nil {
-				httpx.Error(w, 409, "Verification unavailable; wait before retrying or prepare a new request")
+				code, message := withdrawalConfirmationError(err)
+				log.Printf("withdrawal verification rejected: stage=email user_id=%d code=%s", user.ID, code)
+				httpx.JSON(w, 409, withdrawalErrorResponse(err, code, message))
 				return
 			}
 			httpx.JSON(w, 200, map[string]string{"challenge_id": id})
@@ -98,8 +100,10 @@ func withdrawalConfirmationError(err error) (string, string) {
 		return eligibility.Code, eligibility.Message
 	}
 	switch {
+	case errors.Is(err, withdrawalsecurity.ErrWithdrawalEmailDelivery):
+		return "withdrawal_email_delivery_failed", "The verification email could not be sent. Wait before requesting a new email code; contact support if delivery keeps failing."
 	case errors.Is(err, withdrawalsecurity.ErrChallengeCooldown):
-		return "withdrawal_request_cooldown", "Too many recent requests. Wait one minute before requesting another verification email or starting a new withdrawal."
+		return "withdrawal_request_cooldown", "Too many recent requests. Wait before requesting another verification email. Email codes are limited to five per hour."
 	case errors.Is(err, withdrawalsecurity.ErrWithdrawalExpired):
 		return "withdrawal_request_expired", "This withdrawal request expired. Start a new withdrawal and use the new verification email."
 	case errors.Is(err, withdrawalsecurity.ErrWithdrawalEmailExpired):

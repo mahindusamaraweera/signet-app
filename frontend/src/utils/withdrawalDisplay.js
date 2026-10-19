@@ -16,3 +16,12 @@ export function withdrawalRequestNotice(request) {
   if (request.authorization_status === 'invalidated') return 'This approval is no longer valid. Check your withdrawal security settings, then start a new withdrawal.'
   return ''
 }
+
+// A new financial intent requires a known end state for the previous request.
+export function hasOutstandingWithdrawal(requests) {
+  return requests.some(request => {
+    if (['pending', 'cancel_requested', 'cancellation_review_required'].includes(request.queue_status)) return true
+    if (request.remote_withdrawal_id) return !['completed', 'cancelled'].includes(request.payout?.status)
+    return request.queue_status === 'submitted'
+  })
+}

@@ -48,7 +48,7 @@ func TestWithdrawalEmailIssuanceDeliveryAndAuditBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"success", "cooldown", "quota", "audit failure", "mail failure", "record failure"} {
+	for _, scenario := range []string{"success", "cooldown", "quota", "audit failure", "mail failure", "record failure", "expired"} {
 		t.Run(scenario, func(t *testing.T) {
 			key := []byte(strings.Repeat("k", 32))
 			now := time.Unix(1800000000, 0).UTC()
@@ -60,6 +60,10 @@ func TestWithdrawalEmailIssuanceDeliveryAndAuditBoundaries(t *testing.T) {
 			a, proof, err := NewWithdrawalAuthorization(key, terms, now)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if scenario == "expired" {
+				a.ExpiresAt = now
+				a.ProofHash = a.hash(key, proof)
 			}
 			encrypted, err := encryptEnrollment(key, 42, 1, "user@example.com", secret)
 			if err != nil {
@@ -81,8 +85,11 @@ func TestWithdrawalEmailIssuanceDeliveryAndAuditBoundaries(t *testing.T) {
 				{match: "FROM withdrawal_authorizations", values: []driver.Value{a.ID, int64(42), int64(2), terms.AddressID, string(encoded), terms.Digest(), a.ProofHash, "pending", a.ExpiresAt, nil, nil}},
 				{match: "SELECT COUNT(*)", values: []driver.Value{recent}}, {match: "SELECT COUNT(*)", values: []driver.Value{hourly}},
 			}}
+			if scenario == "expired" {
+				fixture.steps = fixture.steps[:5]
+			}
 			var stored Challenge
-			if recent == 0 && hourly < 5 {
+			if scenario != "expired" && recent == 0 && hourly < 5 {
 				fixture.steps = append(fixture.steps, sqlStep{match: "SET status='superseded'"}, sqlStep{match: "INSERT INTO withdrawal_security_challenges", check: func(args []driver.NamedValue) error {
 					stored = Challenge{ID: args[0].Value.(string), UserID: 42, Purpose: args[2].Value.(string), Target: args[3].Value.(string), Email: args[4].Value.(string), Hash: args[5].Value.(string), SecurityVersion: 2, Status: "delivered", ExpiresAt: args[7].Value.(time.Time)}
 					return nil
@@ -128,6 +135,12 @@ func TestWithdrawalEmailIssuanceDeliveryAndAuditBoundaries(t *testing.T) {
 				}
 			} else if err == nil || id != "" {
 				t.Fatal("failed issuance returned challenge")
+			}
+			if scenario == "expired" && !errors.Is(err, ErrWithdrawalExpired) {
+				t.Fatalf("wrong expiration error: %v", err)
+			}
+			if scenario == "mail failure" && !errors.Is(err, ErrWithdrawalEmailDelivery) {
+				t.Fatalf("wrong delivery error: %v", err)
 			}
 			commit := scenario == "success" || scenario == "mail failure" || scenario == "record failure"
 			if fixture.committed != commit || fixture.rolledBack == commit || (mailer.calls == 1) != commit || len(fixture.steps) != 0 {
