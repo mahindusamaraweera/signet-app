@@ -3,11 +3,11 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import api from '@/api/client'
 import WithdrawalCountdown from '@/components/WithdrawalCountdown.vue'
 import { useWithdrawalClock } from '@/composables/useWithdrawalClock'
-import { remainingSeconds, localDeadline, withdrawalErrorMessage, deadlineMillis } from '@/utils/withdrawalTime'
+import { remainingSeconds, withdrawalErrorMessage, deadlineMillis } from '@/utils/withdrawalTime'
 import { loadWithdrawalPayouts } from '@/utils/withdrawalHistory'
 import { verifyAndQueueWithdrawal } from '@/utils/withdrawalSubmission'
 import { assetDisplay } from '@/utils/assetDisplay'
-import { canCancelRequest, withdrawalRequestNotice, hasOutstandingWithdrawal } from '@/utils/withdrawalDisplay'
+import { canCancelRequest, withdrawalRequestNotice, hasOutstandingWithdrawal, withdrawalStatusLabel, withdrawalAmount } from '@/utils/withdrawalDisplay'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
 
 const { now, sync } = useWithdrawalClock()
@@ -15,6 +15,15 @@ const security = ref(null), addresses = ref([]), requests = ref([])
 const amount = ref(''), addressId = ref(''), password = ref(''), emailCode = ref(''), authCode = ref('')
 const prepared = ref(null), challenge = ref(''), stage = ref('draft'), busy = ref(false)
 const historyError = ref('')
+const showVerificationHistory = ref(false)
+const verificationHistory = computed(() => requests.value.filter(r => !r.queue_status && !r.remote_withdrawal_id && ['expired', 'invalidated'].includes(r.authorization_status)))
+const visibleRequests = computed(() => showVerificationHistory.value ? requests.value : requests.value.filter(r => !verificationHistory.value.includes(r)))
+const emailInput = ref(null)
+watch(busy, async value => {
+  if (!value && challenge.value && stage.value === 'prepared' && !emailCode.value) {
+    await nextTick(); if (!stopped) emailInput.value?.focus()
+  }
+})
 const error = ref(''), message = ref(''), uncertain = ref(false)
 const cancelTarget = ref(null), cancelPassword = ref(''), cancelAcknowledged = ref(false)
 const cancelDialog = ref(null), cancelInput = ref(null)
@@ -45,6 +54,9 @@ const pendingQueue = computed(() => requests.value.some(r => ['pending', 'cancel
   || (admissionChecked.value ? !!security.value.active_withdrawal_id : hasOutstandingWithdrawal(requests.value)))
 const previewExpired = computed(() => prepared.value && remainingSeconds(prepared.value.expires_at, now.value) === 0)
 const cancellationEnabled = computed(() => security.value?.withdrawal_cancellation_enabled === true)
+
+// Keep the password only in this mounted flow; never persist it across reloads.
+watch(previewExpired, expired => { if (expired) password.value = '' })
 
 function clearProof() { prepared.value = null; challenge.value = ''; emailCode.value = authCode.value = password.value = '' }
 async function requestStatus() {
@@ -100,7 +112,7 @@ async function act(kind) {
   if ((kind === 'prepare' || kind === 'queue') && (!admissionChecked.value || pendingQueue.value || cooldownWaiting.value)) { error.value = 'Check status. An existing withdrawal or cooldown must end before another request.'; return }
   if (prepared.value && previewExpired.value && kind !== 'prepare') { error.value = 'This verification period ended. Check status and start again.'; return }
   busy.value = true; error.value = ''; message.value = ''
-  const currentPassword = password.value; password.value = ''
+  const currentPassword = password.value
   try {
     if (kind === 'prepare') {
       const { data } = await api.post('/blockchain/withdrawals/prepare', { password: currentPassword, address_id: addressId.value, amount: amount.value })
@@ -110,7 +122,7 @@ async function act(kind) {
       if (kind === 'email') {
         challenge.value = ''; emailCode.value = authCode.value = ''
         const { data } = await api.post('/blockchain/withdrawals/email', body)
-        if (stopped) return; challenge.value = data.challenge_id; message.value = 'Email code sent. Enter the newest email code, a fresh authenticator code and your password, then verify and submit.'
+        if (stopped) return; challenge.value = data.challenge_id; message.value = 'Email code sent. Enter the newest email code, a fresh authenticator code, then verify and submit.'
       } else if (kind === 'confirm') {
         const queued = await verifyAndQueueWithdrawal(api, body, { challenge_id: challenge.value, email_code: emailCode.value, authenticator_code: authCode.value }, () => {
           if (stopped) return false
@@ -147,10 +159,18 @@ async function act(kind) {
     // Do not retain one-time verification codes after a confirmation attempt,
     // including an uncertain response or validation failure.
     if (kind === 'confirm') emailCode.value = authCode.value = ''
+    if (!prepared.value || previewExpired.value) password.value = ''
     if (!stopped) busy.value = false
   }
 }
-onMounted(refresh)
+let statusTimer
+onMounted(() => {
+  refresh()
+  statusTimer = window.setInterval(() => {
+    // Read-only refresh between flows; never interrupt verification or retry a submission.
+    if (!busy.value && !prepared.value && !uncertain.value && !error.value && !cancelTarget.value && document.visibilityState === 'visible') refresh()
+  }, 20000)
+})
 async function cancelRequest() {
   if (busy.value || stopped || !cancelTarget.value || !cancelAcknowledged.value || !cancellationEnabled.value) return
   busy.value = true; error.value = ''; const id = cancelTarget.value.id, currentPassword = cancelPassword.value
@@ -165,52 +185,66 @@ async function cancelRequest() {
     if (!stopped) { error.value = e?.response?.data?.message || 'Cancellation response uncertain. Check request status.'; uncertain.value = true; try { await requestStatus() } catch {} }
   } finally { if (!stopped) busy.value = false }
 }
-onBeforeUnmount(() => { stopped = true; clearProof(); cancelPassword.value = ''; cancelTarget.value = null })
+onBeforeUnmount(() => { stopped = true; window.clearInterval(statusTimer); clearProof(); cancelPassword.value = ''; cancelTarget.value = null })
 </script>
 
 <template>
   <DashboardLayout><div class="wallet-form-page">
     <h1>Withdraw SIGNET</h1>
     <p>Withdraw to your verified BSC address. A 3% fee is included in your requested amount; you receive 97%.</p>
-    <p><RouterLink to="/wallet/security">Set up email, Authenticator and withdrawal address</RouterLink> · <RouterLink to="/wallet/deposits">Withdrawal history</RouterLink></p>
+    <p><RouterLink to="/wallet/security">Withdrawal security</RouterLink> · <RouterLink to="/wallet/deposits">Withdrawal history</RouterLink></p>
     <p v-if="!enabled" class="alert alert-warning">Withdrawal submission is not enabled. Your records remain available below.</p>
     <p v-if="error" role="alert" class="alert alert-danger">{{ error }}</p><p v-if="message" role="status" class="alert alert-info">{{ message }}</p>
     <p v-if="security?.withdrawals_frozen" role="status" class="alert alert-warning">Withdrawals are frozen for this account. Contact support.</p>
     <p v-else-if="security && !securityReady" role="status" class="alert alert-warning">Complete email verification and authenticator setup in <RouterLink to="/wallet/security">Withdrawal security</RouterLink>.</p>
-    <WithdrawalCountdown v-if="security?.hold_until" :deadline="security.hold_until" :now="now" kind="account" />
+    <WithdrawalCountdown v-if="accountWaiting" :deadline="security.hold_until" :now="now" kind="account" compact />
     <WithdrawalCountdown v-if="security?.withdrawal_cooldown_until" :deadline="security.withdrawal_cooldown_until" :now="now" kind="cooldown" compact />
     <p v-if="enabled && security && !admissionChecked" role="status" class="alert alert-warning">Current withdrawal status and cooldown could not be confirmed. Check status before requesting a withdrawal.</p>
     <button class="btn btn-outline-secondary mb-3" :disabled="busy" @click="refresh">Check status</button>
     <p v-if="pendingQueue" role="status" class="alert alert-info">An existing withdrawal is processing or needs review. Check its status below before starting another.</p>
     <button v-if="enabled && (prepared || stage === 'queued')" class="btn btn-outline-secondary mb-3" :disabled="busy || pendingQueue" @click="startNewWithdrawal">{{ prepared ? 'Check status and start again' : 'Start another withdrawal' }}</button>
-    <section v-if="enabled && stage !== 'queued'" class="card p-3 mb-4">
-      <h2 class="h5">{{ !prepared ? '1. Review withdrawal' : stage === 'authorized' ? '3. Submit approved withdrawal' : challenge ? '3. Verify and submit' : '2. Get email code' }}</h2>
+    <ol v-if="enabled" class="withdrawal-steps" aria-label="Withdrawal progress">
+      <li :aria-current="stage !== 'queued' && !prepared ? 'step' : undefined">1. Review</li>
+      <li :aria-current="prepared ? 'step' : undefined">2. Verify codes</li>
+      <li :aria-current="stage === 'queued' ? 'step' : undefined">3. Processing</li>
+    </ol>
+    <section v-if="enabled && stage !== 'queued'" class="card p-3 mb-4 withdrawal-method">
+      <h2 class="h5">{{ !prepared ? '1. Review withdrawal' : stage === 'authorized' ? '2. Submit approved withdrawal' : '2. Verify codes' }}</h2>
       <WithdrawalCountdown v-if="prepared" :deadline="prepared.expires_at" :now="now" kind="verification" compact />
       <template v-if="!prepared">
         <label for="withdraw-address">Withdrawal address</label><select id="withdraw-address" v-model="addressId" class="form-select mb-3" :disabled="busy"><option value="">Select address</option><option v-for="a in availableAddresses" :key="a.id" :value="a.id">{{ a.address }}{{ remainingSeconds(a.eligible_at, now) === 0 ? '' : ' · Waiting' }}</option></select>
-        <WithdrawalCountdown v-if="selectedAddress" :deadline="selectedAddress.eligible_at" :now="now" compact />
+        <WithdrawalCountdown v-if="selectedAddress && addressWaiting" :deadline="selectedAddress.eligible_at" :now="now" compact />
         <p v-if="!availableAddresses.length" class="small">No verified address found. <RouterLink to="/wallet/security">Verify a withdrawal address</RouterLink>.</p>
-        <label for="withdraw-amount">Gross SIGNET amount (fee included)</label><input id="withdraw-amount" v-model="amount" inputmode="decimal" class="form-control mb-3" :disabled="busy" />
+        <label for="withdraw-amount">Amount in SIGNET (includes 3% fee)</label><input id="withdraw-amount" v-model="amount" inputmode="decimal" class="form-control mb-3" :disabled="busy" />
       </template>
-      <template v-else><p class="text-break">Destination: {{ prepared.terms.destination }}</p><p>Gross: {{ prepared.terms.gross }} SIGNET<br>3% fee: {{ prepared.terms.fee }} SIGNET<br>You receive: {{ prepared.terms.net }} SIGNET</p><p>Approval expires: {{ localDeadline(prepared.expires_at) }} · your local time</p></template>
-      <label for="withdraw-password">Current password</label><input id="withdraw-password" v-model="password" type="password" autocomplete="current-password" maxlength="72" class="form-control mb-3" :disabled="busy" />
+      <template v-else>
+        <dl class="withdrawal-totals">
+          <div><dt>Requested</dt><dd>{{ withdrawalAmount(prepared.terms.gross) }} SIGNET</dd></div>
+          <div><dt>Fee · 3%</dt><dd>{{ withdrawalAmount(prepared.terms.fee) }} SIGNET</dd></div>
+          <div class="withdrawal-net"><dt>You receive</dt><dd>{{ withdrawalAmount(prepared.terms.net) }} SIGNET</dd></div>
+        </dl>
+        <div class="withdrawal-destination"><span class="small">Destination · BSC</span><p class="text-break">{{ prepared.terms.destination }}</p></div>
+        <p v-if="previewExpired" role="status" class="alert alert-warning">Verification expired. Choose “Check status and start again” above to restart with the same amount and address.</p>
+      </template>
+      <template v-if="!prepared"><label for="withdraw-password">Current password</label><input id="withdraw-password" v-model="password" type="password" autocomplete="current-password" maxlength="72" class="form-control mb-3" :disabled="busy" /></template>
       <button v-if="!prepared" class="btn btn-primary" :disabled="busy || uncertain || !admissionChecked || pendingQueue || cooldownWaiting || !securityReady || accountWaiting || addressWaiting || !password || !selectedAddress || !/^[0-9]{1,18}(\.[0-9]{1,18})?$/.test(amount)" @click="act('prepare')">{{ pendingQueue ? 'Withdrawal already processing' : cooldownWaiting ? 'Withdrawal cooldown active' : accountWaiting || addressWaiting ? 'Waiting period active' : 'Review exact withdrawal' }}</button>
       <template v-else-if="stage === 'prepared'">
-        <button class="btn btn-primary mb-3" :disabled="busy || uncertain || previewExpired || !password" @click="act('email')">{{ challenge ? 'Send new email code' : 'Send verification email' }}</button>
-        <template v-if="challenge"><label for="withdraw-email">Email code</label><input id="withdraw-email" v-model="emailCode" maxlength="6" inputmode="numeric" autocomplete="one-time-code" class="form-control mb-3" :disabled="busy" /><label for="withdraw-auth">Authenticator code</label><p class="small">Use the current code from your withdrawal authenticator. If you already used it, wait for the next code.</p><input id="withdraw-auth" v-model="authCode" maxlength="6" inputmode="numeric" autocomplete="off" class="form-control mb-3" :disabled="busy" /><button class="btn btn-primary" :disabled="busy || uncertain || previewExpired || !password || !/^\d{6}$/.test(emailCode) || !/^\d{6}$/.test(authCode)" @click="act('confirm')">Verify and submit withdrawal</button></template>
+        <button class="btn btn-primary mb-3" :disabled="busy || uncertain || previewExpired || !password" @click="act('email')">{{ busy ? 'Please wait…' : challenge ? 'Resend email code' : 'Send verification email' }}</button>
+        <template v-if="challenge"><div class="withdrawal-codes"><div><label for="withdraw-email">Email code</label><input ref="emailInput" id="withdraw-email" v-model="emailCode" maxlength="6" inputmode="numeric" autocomplete="one-time-code" class="form-control mb-3" :disabled="busy" /></div><div><label for="withdraw-auth">Authenticator code</label><input id="withdraw-auth" v-model="authCode" maxlength="6" inputmode="numeric" autocomplete="off" class="form-control mb-3" :disabled="busy" /></div></div><p class="small">Enter the newest email code and a fresh Authenticator code.</p><button class="btn btn-primary" :disabled="busy || uncertain || previewExpired || !password || !/^\d{6}$/.test(emailCode) || !/^\d{6}$/.test(authCode)" @click="act('confirm')">{{ busy ? 'Verifying and submitting…' : 'Verify and submit withdrawal' }}</button></template>
       </template>
       <button v-else-if="stage === 'authorized'" class="btn btn-primary" :disabled="busy || uncertain || !admissionChecked || pendingQueue || cooldownWaiting || previewExpired || !password" @click="act('queue')">Submit approved withdrawal</button>
     </section>
-    <h2 class="h5 mt-4">Recent withdrawal requests</h2><p>Payout status comes from custody. Submitted means reserved, awaiting processing. Older payouts are available in withdrawal history.</p>
+    <h2 class="h5 mt-4">Withdrawal activity</h2><p class="small">Updates automatically while this page is open and verification is not in progress. Submitted requests still need custody processing; only Completed confirms payment.</p>
+    <button v-if="verificationHistory.length" class="btn btn-outline-secondary btn-sm mb-3" :aria-expanded="showVerificationHistory" @click="showVerificationHistory = !showVerificationHistory">{{ showVerificationHistory ? 'Hide' : 'Show' }} expired verification attempts ({{ verificationHistory.length }})</button>
     <p v-if="historyError" role="status" class="alert alert-warning">{{ historyError }}</p>
-    <p v-if="!busy && !error && !requests.length" class="wallet-empty">No withdrawal requests yet.</p>
+    <p v-if="!busy && !error && !visibleRequests.length" class="wallet-empty">No current withdrawal requests. Older attempts are available above.</p>
     <div class="withdrawal-list">
-      <article v-for="r in requests" :key="r.id" class="withdrawal-record">
+      <article v-for="r in visibleRequests" :key="r.id" class="withdrawal-record">
         <div class="withdrawal-heading">
-          <strong>{{ assetDisplay(r.payout?.net_amount || r.terms.net, 'SIGNET') }} <small>SIGNET</small></strong>
-          <span class="withdrawal-badge" :class="{ completed: r.payout?.status === 'completed' }">{{ r.payout?.status?.replaceAll('_', ' ') || (r.queue_status || r.authorization_status).replaceAll('_', ' ') }}</span>
+          <strong>{{ withdrawalAmount(r.payout?.net_amount || r.terms.net) }} <small>SIGNET</small></strong>
+          <span class="withdrawal-badge" :class="{ completed: r.payout?.status === 'completed' }">{{ withdrawalStatusLabel(r) }}</span>
         </div>
-        <p class="small mb-2">Requested {{ assetDisplay(r.terms.gross, 'SIGNET') }} · Fee {{ assetDisplay(r.terms.fee, 'SIGNET') }} SIGNET</p>
+        <p class="small mb-2">Requested {{ withdrawalAmount(r.terms.gross) }} · Fee {{ withdrawalAmount(r.terms.fee) }} SIGNET</p>
         <p v-if="withdrawalRequestNotice(r)" class="small">{{ withdrawalRequestNotice(r) }}</p>
         <p v-if="r.remote_withdrawal_id && !r.payout" class="small">Payout status not loaded. Check withdrawal history before trying again.</p>
         <p v-if="r.queue_status === 'cancellation_review_required'" class="text-warning small">Cancellation needs review. Contact support; a refund is not confirmed.</p>
@@ -240,6 +274,24 @@ onBeforeUnmount(() => { stopped = true; clearProof(); cancelPassword.value = '';
 </template>
 
 <style scoped>
+.withdrawal-method { gap: 4px; }
+.withdrawal-method .form-control, .withdrawal-method .form-select { min-height: 44px; }
+.withdrawal-method label { font-size: .9rem; margin-bottom: 6px; }
+.withdrawal-method .btn { min-height: 44px; }
+.withdrawal-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.withdrawal-totals > div { padding: 12px; background: #0b1921; border-radius: 8px; overflow-wrap: anywhere; }
+.withdrawal-totals dt { font-size: .8rem; color: #afc4cc; font-weight: 400; }
+.withdrawal-totals dd { margin: 6px 0 0; font-weight: 600; }
+.withdrawal-net { border: 1px solid #3f8d80; }
+.withdrawal-destination { margin-bottom: 16px; }
+.withdrawal-destination summary { cursor: pointer; }
+.withdrawal-destination p { font-size: .85rem; margin: 8px 0; }
+.withdrawal-codes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 576px) { .withdrawal-totals { grid-template-columns: 1fr; gap: 6px; } .withdrawal-totals > div { display: flex; justify-content: space-between; gap: 12px; } .withdrawal-totals dd { margin: 0; } .withdrawal-codes { grid-template-columns: 1fr; gap: 0; } }
+
+.withdrawal-steps { display: flex; flex-wrap: wrap; gap: 12px; padding: 0; list-style: none; margin: 0 0 20px; }
+.withdrawal-steps li { padding: 8px 14px; border: 1px solid #526570; border-radius: 8px; }
+.withdrawal-steps [aria-current="step"] { color: #8be8f2; border-color: #8be8f2; font-weight: 700; }
 .wallet-form-page { max-width: 880px; margin-inline: auto; }
 .withdrawal-list { display: grid; gap: 12px; }
 .withdrawal-record { padding: 18px; border: 1px solid #29434c; border-radius: 16px; background: #0b1921; }

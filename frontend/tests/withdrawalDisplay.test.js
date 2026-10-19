@@ -24,3 +24,21 @@ test('expired approval guidance never overrides a queued or remote payment', asy
   assert.equal(withdrawalRequestNotice({ authorization_status: 'expired', queue_status: 'pending' }), '')
   assert.equal(withdrawalRequestNotice({ authorization_status: 'expired', remote_withdrawal_id: '508' }), '')
 })
+
+test('status labels distinguish verification from custody processing', async () => {
+  const { withdrawalStatusLabel } = await import('../src/utils/withdrawalDisplay.js')
+  assert.equal(withdrawalStatusLabel({ authorization_status: 'pending' }), 'Verification incomplete')
+  assert.equal(withdrawalStatusLabel({ authorization_status: 'expired' }), 'Verification expired')
+  assert.equal(withdrawalStatusLabel({ authorization_status: 'expired', queue_status: 'pending' }), 'Submitted · awaiting custody')
+  assert.equal(withdrawalStatusLabel({ authorization_status: 'expired', remote_withdrawal_id: '5', payout: { status: 'completed' } }), 'Completed')
+  assert.equal(withdrawalStatusLabel({ remote_withdrawal_id: '5' }), 'Payout status unavailable')
+  assert.equal(withdrawalStatusLabel({ remote_withdrawal_id: '5', payout: { status: 'approval_pending' } }), 'Awaiting admin approval')
+})
+
+test('withdrawal amounts remove padding while retaining every significant digit', async () => {
+  const { withdrawalAmount } = await import('../src/utils/withdrawalDisplay.js')
+  assert.equal(withdrawalAmount('22588.000000000000000000'), '22,588')
+  assert.equal(withdrawalAmount('677.640000000000000000'), '677.64')
+  assert.equal(withdrawalAmount('999999999999999999.000000000000000001'), '999,999,999,999,999,999.000000000000000001')
+  assert.equal(withdrawalAmount(null), '—')
+})
