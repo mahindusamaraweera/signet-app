@@ -4,10 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
 var ErrInvalidOrReusedCode = errors.New("invalid or reused authenticator code")
+
+var ErrInvalidCode = fmt.Errorf("%w: code does not match", ErrInvalidOrReusedCode)
+var ErrReusedCode = fmt.Errorf("%w: time step already consumed", ErrInvalidOrReusedCode)
 
 type counterExecutor interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
@@ -27,11 +31,11 @@ func ConsumeWithdrawalCode(ctx context.Context, tx *sql.Tx, userID uint64, secre
 
 func consumeWithdrawalCode(ctx context.Context, tx counterExecutor, userID uint64, secret, submitted string, at time.Time) error {
 	if userID == 0 {
-		return ErrInvalidOrReusedCode
+		return ErrInvalidCode
 	}
 	counter, ok := MatchingStep(secret, submitted, at, -1)
 	if !ok {
-		return ErrInvalidOrReusedCode
+		return ErrInvalidCode
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO withdrawal_totp_counters (user_id, last_counter) VALUES (?, -1) ON DUPLICATE KEY UPDATE user_id = user_id`, userID); err != nil {
 		return err
@@ -45,7 +49,7 @@ func consumeWithdrawalCode(ctx context.Context, tx counterExecutor, userID uint6
 		return err
 	}
 	if rows != 1 {
-		return ErrInvalidOrReusedCode
+		return ErrReusedCode
 	}
 	return nil
 }

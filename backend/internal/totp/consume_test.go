@@ -45,11 +45,11 @@ func TestWithdrawalCounterConsumption(t *testing.T) {
 	if err := consumeWithdrawalCode(ctx, store, 42, secret, value, at); err != nil {
 		t.Fatal(err)
 	}
-	if err := consumeWithdrawalCode(ctx, store, 42, secret, value, at); !errors.Is(err, ErrInvalidOrReusedCode) {
+	if err := consumeWithdrawalCode(ctx, store, 42, secret, value, at); !errors.Is(err, ErrReusedCode) || !errors.Is(err, ErrInvalidOrReusedCode) {
 		t.Fatalf("replay: %v", err)
 	}
 	invalid := &counterFake{last: -1}
-	if err := consumeWithdrawalCode(ctx, invalid, 42, secret, "bad", at); !errors.Is(err, ErrInvalidOrReusedCode) || invalid.calls != 0 {
+	if err := consumeWithdrawalCode(ctx, invalid, 42, secret, "bad", at); !errors.Is(err, ErrInvalidCode) || !errors.Is(err, ErrInvalidOrReusedCode) || invalid.calls != 0 {
 		t.Fatal("invalid code touched storage")
 	}
 	if err := consumeWithdrawalCode(ctx, &counterFake{fail: true}, 42, secret, value, at); err == nil {
