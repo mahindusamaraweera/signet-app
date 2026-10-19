@@ -79,6 +79,9 @@ func (s *Service) PrepareWithdrawal(ctx context.Context, userID uint64, password
 	if err := withdrawalAddressEligibility(verifiedAddress, eligible, revoked, now); err != nil {
 		return PreparedWithdrawal{}, err
 	}
+	if err := assertNoPendingWithdrawal(ctx, tx, userID, ""); err != nil {
+		return PreparedWithdrawal{}, err
+	}
 	var recent int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM withdrawal_authorizations WHERE user_id=? AND created_at>=?`, userID, now.UTC().Add(-time.Minute)).Scan(&recent); err != nil {
 		return PreparedWithdrawal{}, err

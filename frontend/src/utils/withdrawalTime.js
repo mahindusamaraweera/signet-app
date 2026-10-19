@@ -24,8 +24,8 @@ export function localDeadline(value) {
 }
 
 export function withdrawalErrorMessage(data) {
-  if (['withdrawal_security_wait', 'withdrawal_address_wait'].includes(data?.code) && deadlineMillis(data.available_at) !== null) {
-    const subject = data.code === 'withdrawal_security_wait' ? 'Account security wait' : 'Address waiting period'
+  if (['withdrawal_security_wait', 'withdrawal_address_wait', 'withdrawal_cooldown_active'].includes(data?.code) && deadlineMillis(data.available_at) !== null) {
+    const subject = data.code === 'withdrawal_security_wait' ? 'Account security wait' : data.code === 'withdrawal_cooldown_active' ? 'Withdrawal cooldown' : 'Address waiting period'
     return `${subject} ends ${localDeadline(data.available_at)} (your local time). Check the countdown before trying again.`
   }
   return data?.message || 'Response uncertain. Check request status before retrying.'

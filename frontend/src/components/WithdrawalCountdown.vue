@@ -5,8 +5,8 @@ const props = defineProps({ deadline: String, now: { type: Number, required: tru
 const remaining = computed(() => remainingSeconds(props.deadline, props.now))
 const waiting = computed(() => remaining.value !== null && remaining.value > 0)
 const title = computed(() => remaining.value === null ? 'Waiting time unavailable' : waiting.value
-  ? props.kind === 'account' ? 'Account security wait' : props.kind === 'verification' ? 'Complete verification in' : 'Address available in'
-  : props.kind === 'verification' ? 'Verification time ended' : props.kind === 'account' ? 'Account waiting period ended' : 'Address waiting period ended')
+  ? props.kind === 'account' ? 'Account security wait' : props.kind === 'verification' ? 'Complete verification in' : props.kind === 'cooldown' ? 'Withdrawal cooldown' : 'Address available in'
+  : props.kind === 'verification' ? 'Verification time ended' : props.kind === 'account' ? 'Account waiting period ended' : props.kind === 'cooldown' ? 'Withdrawal cooldown ended' : 'Address waiting period ended')
 </script>
 
 <template>
@@ -16,6 +16,7 @@ const title = computed(() => remaining.value === null ? 'Waiting time unavailabl
     <p v-if="deadline && remaining !== null" class="countdown-date">{{ kind === 'verification' ? 'Expires' : 'Ends' }} {{ localDeadline(deadline) }} <span>· your local time</span></p>
     <p v-if="remaining === null" class="countdown-help">Check status to load the deadline.</p>
     <p v-else-if="kind === 'verification'" class="countdown-help">{{ waiting ? 'Use the newest email code and a fresh authenticator code.' : 'Check request status before starting again. Do not repeat a submitted withdrawal.' }}</p>
+    <p v-else-if="kind === 'cooldown'" class="countdown-help">{{ waiting ? 'An existing withdrawal must also finish before you can request another.' : 'Check status before starting your next withdrawal.' }}</p>
     <p v-else class="countdown-help">{{ waiting ? kind === 'account' ? 'You can request a withdrawal after this wait and your address wait both end.' : 'A longer account security wait may still apply.' : 'Check status to confirm your current eligibility. Other security checks still apply.' }}</p>
   </div>
 </template>

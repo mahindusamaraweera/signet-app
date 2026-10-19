@@ -75,7 +75,7 @@ func TestWithdrawalPreparationStoresCanonicalTermsAndRollsBackFailures(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"success", "revoked address", "address wait", "quota", "insert failure", "audit failure"} {
+	for _, scenario := range []string{"success", "revoked address", "address wait", "quota", "insert failure", "audit failure", "already pending"} {
 		t.Run(scenario, func(t *testing.T) {
 			key := []byte(strings.Repeat("k", 32))
 			now := time.Unix(1800000000, 0).UTC()
@@ -111,6 +111,7 @@ func TestWithdrawalPreparationStoresCanonicalTermsAndRollsBackFailures(t *testin
 				if scenario == "quota" {
 					count = 5
 				}
+				fixture.steps = append(fixture.steps, sqlStep{match: "SELECT COUNT(*) FROM withdrawal_submission_outbox", values: []driver.Value{int64(0)}})
 				fixture.steps = append(fixture.steps, sqlStep{match: "SELECT COUNT(*) FROM withdrawal_authorizations", values: []driver.Value{count}})
 				if count == 0 {
 					insert := sqlStep{match: "INSERT INTO withdrawal_authorizations", check: func(args []driver.NamedValue) error {
@@ -142,6 +143,16 @@ func TestWithdrawalPreparationStoresCanonicalTermsAndRollsBackFailures(t *testin
 					}
 				}
 			}
+			if scenario == "already pending" {
+				for i, step := range fixture.steps {
+					if step.match == "SELECT COUNT(*) FROM withdrawal_submission_outbox" {
+						fixture.steps = fixture.steps[:i+1]
+						fixture.steps[i].values = []driver.Value{int64(1)}
+						break
+					}
+				}
+			}
+
 			db := sql.OpenDB(fixture)
 			defer db.Close()
 			s, err := NewService(db, key)

@@ -34,3 +34,13 @@ test('wait errors show local deadlines while other exact errors are preserved', 
   assert.ok(!message.includes('raw UTC'))
   assert.equal(withdrawalErrorMessage({ code: 'withdrawal_email_incorrect', message: 'The email code is incorrect.' }), 'The email code is incorrect.')
 })
+
+
+test('shared token cooldown errors display a local deadline', () => {
+  const data = { code: 'withdrawal_cooldown_active', available_at: '2026-10-19T14:16:49Z' }
+  // The same formatter is used for account, address and custody cooldown waits.
+  return import('../src/utils/withdrawalTime.js').then(({withdrawalErrorMessage}) => {
+    assert.match(withdrawalErrorMessage(data), /Withdrawal cooldown ends/)
+    assert.match(withdrawalErrorMessage(data), /your local time/)
+  })
+})

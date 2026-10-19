@@ -7,6 +7,10 @@ import (
 )
 
 type Status struct {
+	AdmissionChecked       bool       `json:"withdrawal_admission_checked"`
+	ActiveWithdrawalID     *string    `json:"active_withdrawal_id"`
+	CooldownMinutes        int        `json:"withdrawal_cooldown_minutes"`
+	CooldownUntil          *time.Time `json:"withdrawal_cooldown_until"`
 	ServerTime             time.Time  `json:"server_time"`
 	EmailVerified          bool       `json:"email_verified"`
 	AuthenticatorConfirmed bool       `json:"authenticator_confirmed"`

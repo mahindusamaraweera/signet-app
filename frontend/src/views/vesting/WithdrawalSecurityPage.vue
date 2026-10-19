@@ -130,6 +130,8 @@ onBeforeUnmount(() => {
       <h2 class="h5">Your security checklist</h2><div class="security-checklist"><div><span>Email verification</span><strong :class="status.email_verified ? 'text-success' : 'text-warning'">{{ status.email_verified ? 'Verified' : 'Required' }}</strong></div><div><span>Authenticator</span><strong :class="status.authenticator_confirmed ? 'text-success' : 'text-warning'">{{ status.authenticator_confirmed ? 'Confirmed' : 'Setup required' }}</strong></div></div>
       <p v-if="status.withdrawals_frozen" class="text-danger">Withdrawals are frozen. Contact support.</p>
       <WithdrawalCountdown v-if="status.hold_until" :deadline="status.hold_until" :now="now" kind="account" />
+      <p v-if="status.active_withdrawal_id" role="status" class="alert alert-info">An existing withdrawal is processing or needs review. Wait for completion or confirmed cancellation before requesting another.</p>
+      <WithdrawalCountdown v-if="status.withdrawal_cooldown_until" :deadline="status.withdrawal_cooldown_until" :now="now" kind="cooldown" compact />
       <button class="btn btn-outline-secondary" :disabled="busy" @click="action('refresh')">Refresh status</button>
     </section>
     <section v-if="status && !status.authenticator_confirmed && !status.withdrawals_frozen" class="card p-3">
