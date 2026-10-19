@@ -7,6 +7,7 @@ import (
 )
 
 type Status struct {
+	ServerTime             time.Time  `json:"server_time"`
 	EmailVerified          bool       `json:"email_verified"`
 	AuthenticatorConfirmed bool       `json:"authenticator_confirmed"`
 	Frozen                 bool       `json:"withdrawals_frozen"`
@@ -28,7 +29,7 @@ func (s *Service) Status(ctx context.Context, userID uint64) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	result := Status{EmailVerified: verifiedAt.Valid && verifiedEmail.String == email, Frozen: frozen.Bool}
+	result := Status{ServerTime: time.Now().UTC(), EmailVerified: verifiedAt.Valid && verifiedEmail.String == email, Frozen: frozen.Bool}
 	if hold.Valid {
 		result.HoldUntil = &hold.Time
 	}

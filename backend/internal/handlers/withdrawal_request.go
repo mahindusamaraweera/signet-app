@@ -50,7 +50,7 @@ func withdrawalRequestHandler(d *app.Deps, action string) http.HandlerFunc {
 			if err != nil {
 				code, message := withdrawalConfirmationError(err)
 				log.Printf("withdrawal verification rejected: stage=%s user_id=%d code=%s", action, user.ID, code)
-				httpx.JSON(w, 409, map[string]string{"message": message, "code": code})
+				httpx.JSON(w, 409, withdrawalErrorResponse(err, code, message))
 				return
 			}
 			httpx.JSON(w, 200, prepared)
@@ -73,7 +73,7 @@ func withdrawalRequestHandler(d *app.Deps, action string) http.HandlerFunc {
 			if err := d.WithdrawalSecurity.ConfirmWithdrawal(r.Context(), user.ID, body.Password, body.ID, body.Proof, body.Terms, body.ChallengeID, body.EmailCode, body.AuthenticatorCode, now); err != nil {
 				code, message := withdrawalConfirmationError(err)
 				log.Printf("withdrawal verification rejected: stage=%s user_id=%d code=%s", action, user.ID, code)
-				httpx.JSON(w, 409, map[string]string{"message": message, "code": code})
+				httpx.JSON(w, 409, withdrawalErrorResponse(err, code, message))
 				return
 			}
 			httpx.JSON(w, 200, map[string]string{"status": "authorized", "id": body.ID})
@@ -119,4 +119,13 @@ func withdrawalConfirmationError(err error) (string, string) {
 	default:
 		return "withdrawal_verification_failed", "Verification could not complete. Check your password and withdrawal security settings, then check request status before retrying."
 	}
+}
+
+func withdrawalErrorResponse(err error, code, message string) map[string]string {
+	response := map[string]string{"message": message, "code": code}
+	var eligibility *withdrawalsecurity.EligibilityError
+	if errors.As(err, &eligibility) && eligibility.AvailableAt != "" {
+		response["available_at"] = eligibility.AvailableAt
+	}
+	return response
 }

@@ -1,6 +1,10 @@
 <script setup>
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import QRCode from 'qrcode'
+import WithdrawalCountdown from '@/components/WithdrawalCountdown.vue'
+import { useWithdrawalClock } from '@/composables/useWithdrawalClock'
+import { localDeadline } from '@/utils/withdrawalTime'
+const { now, sync } = useWithdrawalClock()
 import api from '@/api/client'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
 
@@ -28,7 +32,7 @@ let stopped = false
 
 async function refresh() {
   const { data } = await api.get('/blockchain/security')
-  if (!stopped) status.value = data
+  if (!stopped) { status.value = data; sync(data.server_time) }
   const { data: addressData } = await api.get('/blockchain/security/addresses')
   if (!stopped) addresses.value = addressData.addresses || []
 }
@@ -125,7 +129,7 @@ onBeforeUnmount(() => {
     <section v-if="status" class="card p-3 mb-3">
       <h2 class="h5">Your security checklist</h2><div class="security-checklist"><div><span>Email verification</span><strong :class="status.email_verified ? 'text-success' : 'text-warning'">{{ status.email_verified ? 'Verified' : 'Required' }}</strong></div><div><span>Authenticator</span><strong :class="status.authenticator_confirmed ? 'text-success' : 'text-warning'">{{ status.authenticator_confirmed ? 'Confirmed' : 'Setup required' }}</strong></div></div>
       <p v-if="status.withdrawals_frozen" class="text-danger">Withdrawals are frozen. Contact support.</p>
-      <p v-if="status.hold_until">Security hold until {{ status.hold_until }}. Verified-address requirements still apply after the hold.</p>
+      <WithdrawalCountdown v-if="status.hold_until" :deadline="status.hold_until" :now="now" kind="account" />
       <button class="btn btn-outline-secondary" :disabled="busy" @click="action('refresh')">Refresh status</button>
     </section>
     <section v-if="status && !status.authenticator_confirmed && !status.withdrawals_frozen" class="card p-3">
@@ -143,7 +147,7 @@ onBeforeUnmount(() => {
         <p class="mt-3">{{ setup.existing_authenticator ? 'Use your existing authenticator to confirm ownership. Its secret is not displayed.' : 'Scan this QR code in Google Authenticator, then enter its code below. Keep the secret private.' }}</p>
         <img v-if="qr" :src="qr" alt="Authenticator setup QR code" width="220" height="220" />
         <p v-if="setup.secret" class="text-break">Manual setup secret: {{ setup.secret }}</p>
-        <p>Setup expires at {{ setup.expires_at }}.</p>
+        <p>Setup expires at {{ localDeadline(setup.expires_at) }} (your local time).</p>
         <label for="security-auth-code">Authenticator code</label>
         <input id="security-auth-code" v-model="authCode" inputmode="numeric" autocomplete="off" maxlength="6" class="form-control mb-3" :disabled="busy" />
         <button class="btn btn-primary" :disabled="busy || !password || !/^\d{6}$/.test(authCode)" @click="action('confirm')">Confirm authenticator</button>
@@ -171,8 +175,8 @@ onBeforeUnmount(() => {
       <h2 class="h5">Verified withdrawal addresses</h2>
       <div v-for="saved in addresses" :key="saved.id" class="border-bottom py-2">
         <p class="text-break mb-1">{{ saved.asset }} · {{ saved.network }} · {{ saved.address }}</p>
-        <p v-if="saved.revoked_at" class="text-danger mb-1">Revoked at {{ saved.revoked_at }}</p>
-        <p v-else class="mb-1">Address waiting period ends at {{ saved.eligible_at }}. Account security holds and withdrawal authorization still apply.</p>
+        <p v-if="saved.revoked_at" class="text-danger mb-1">Revoked at {{ localDeadline(saved.revoked_at) }} (your local time)</p>
+        <WithdrawalCountdown v-else :deadline="saved.eligible_at" :now="now" compact />
         <button v-if="!saved.revoked_at && !revokeTarget && status?.authenticator_confirmed && !status?.withdrawals_frozen" class="btn btn-outline-danger" :disabled="busy" @click="revokeTarget = saved; password = ''">Revoke address</button>
       </div>
       <div v-if="revokeTarget" class="mt-3">
