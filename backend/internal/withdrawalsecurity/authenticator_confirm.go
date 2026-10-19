@@ -71,8 +71,8 @@ func (s *Service) ConfirmAuthenticator(ctx context.Context, userID uint64, passw
 	if err != nil {
 		return err
 	}
-	// Token AccountSecurityService defaults to a 48-hour security-change hold.
-	until := now.UTC().Add(48 * time.Hour)
+	// Apply a 24-hour security-change hold, preserving longer existing holds.
+	until := now.UTC().Add(24 * time.Hour)
 	if hold.Valid && hold.Time.After(until) {
 		until = hold.Time
 	}
