@@ -54,7 +54,7 @@ func withdrawalAuthenticatorHandler(d *app.Deps, confirm bool) http.HandlerFunc 
 			return
 		}
 		if confirm {
-			httpx.OK(w, map[string]interface{}{"status": "confirmed", "message": "Authenticator confirmed. A 48-hour withdrawal security hold applies; a longer existing hold is preserved."})
+			httpx.OK(w, map[string]interface{}{"status": "confirmed", "message": "Authenticator confirmed. A 24-hour withdrawal security hold applies; a longer existing hold is preserved."})
 		} else {
 			httpx.JSON(w, 200, setup)
 		}
