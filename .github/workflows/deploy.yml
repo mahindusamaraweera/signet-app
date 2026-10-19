@@ -67,6 +67,7 @@ jobs:
           go build -trimpath -ldflags="-s -w" -o ../release/signet-api ./cmd/api
           go build -trimpath -ldflags="-s -w" -o ../release/migrate ./cmd/migrate
           go build -trimpath -ldflags="-s -w" -o ../release/custody-recovery-proof ./cmd/custody-recovery-proof
+          go build -trimpath -ldflags="-s -w" -o ../release/historical-mining-cutover ./cmd/historical-mining-cutover
 
       - name: Build frontend
         working-directory: frontend
