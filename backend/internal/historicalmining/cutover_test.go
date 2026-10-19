@@ -85,9 +85,14 @@ func original(p Profile) Mining {
 	return Mining{p.MiningID, p.UserID, p.OldTotal, "13637.49991272", "1000", "active", "pending", "", "2", "2026-10-19 00:01:00", "2026-10-05 09:32:45", "2026-10-19 00:00:00"}
 }
 func reads(p Profile, m Mining, audit *Snapshot) []step {
+	activation, err := time.Parse("2006-01-02 15:04:05", p.Activated)
+	if err != nil {
+		panic(err)
+	}
+	utcActivation := activation.Add(-330 * time.Minute).Format("2006-01-02 15:04:05")
 	s := []step{
 		{match: "FROM users", cols: []string{"email", "uuid", "status"}, vals: []driver.Value{p.Email, p.UUID, "active"}},
-		{match: "FROM user_packages", cols: []string{"user_id", "package", "status", "sale", "activated"}, vals: []driver.Value{int64(p.UserID), p.PackageID, "active", "first", p.Activated}},
+		{match: "FROM user_packages", cols: []string{"user_id", "package", "status", "sale", "activated"}, vals: []driver.Value{int64(p.UserID), p.PackageID, "active", "first", utcActivation}},
 		{match: "FROM user_minings", cols: []string{"id", "user_id", "total_token", "mining_token", "daily_mining", "status", "webhook_status", "webhook_sent_at", "webhook_attempts", "next_retry_at", "created_at", "updated_at"}, vals: []driver.Value{int64(m.ID), int64(m.UserID), m.Total, m.Accrued, m.Daily, m.Status, m.WebhookStatus, m.WebhookSent, m.WebhookAttempts, m.NextRetry, m.Created, m.Updated}},
 		{match: "FROM historical_mining_cutovers", cols: []string{"snapshot_json", "snapshot_sha256", "batch_id"}}}
 	if audit != nil {
@@ -231,5 +236,34 @@ func TestOptionOneBatchIsSeparateAndArchivesOnlyNineReviewedMiningRows(t *testin
 	}
 	if _, err := RunBatch(context.Background(), db, true, false, now, "all-users"); err == nil {
 		t.Fatal("unreviewed batch accepted")
+	}
+}
+
+func TestPackageActivationUsesUTCWithoutChangingReviewedEvidence(t *testing.T) {
+	p := OptionOneProfiles()[0]
+	for _, tc := range []struct {
+		timestamp string
+		valid     bool
+	}{
+		{"2026-07-03 20:25:25", true},
+		{"2026-07-04 01:55:25", false},
+		{"2026-07-03 20:25:26", false},
+	} {
+		f := &fixture{steps: reads(p, original(p), nil)[:2]}
+		f.steps[1].vals[4] = tc.timestamp
+		db := dbFor(f)
+		tx, err := db.BeginTxx(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = loadOwner(context.Background(), tx, p)
+		if (err == nil) != tc.valid {
+			t.Errorf("timestamp %s: %v", tc.timestamp, err)
+		}
+		tx.Rollback()
+		db.Close()
+	}
+	if p.Activated != "2026-07-04 01:55:25" {
+		t.Fatal("reviewed proof timestamp changed")
 	}
 }
