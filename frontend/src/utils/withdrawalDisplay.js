@@ -25,3 +25,31 @@ export function hasOutstandingWithdrawal(requests) {
     return request.queue_status === 'submitted'
   })
 }
+
+// Custody and queue evidence take precedence over verification-only state.
+export function withdrawalStatusLabel(request) {
+  if (request.queue_status === 'cancel_requested') return 'Cancellation requested'
+  if (request.queue_status === 'cancellation_review_required') return 'Cancellation needs review'
+  const labels = {
+    completed: 'Completed', cancelled: 'Cancelled', approval_pending: 'Awaiting admin approval',
+    audit_pending: 'Security checks', external_security_pending: 'Security checks',
+    security_hold: 'Security hold', audit_failed: 'Needs review', broadcast_failed: 'Needs review',
+    queued: 'Processing', broadcasting: 'Sending payment', confirming: 'Confirming payment',
+    otp_pending: 'Verification required',
+  }
+  if (request.remote_withdrawal_id) {
+    return request.payout ? labels[request.payout.status] || 'Processing' : 'Payout status unavailable'
+  }
+  if (request.queue_status === 'pending' || request.queue_status === 'submitted') return 'Submitted · awaiting custody'
+  if (request.queue_status === 'cancelled') return 'Cancelled'
+  return { pending: 'Verification incomplete', authorized: 'Verified · submit withdrawal',
+    expired: 'Verification expired', invalidated: 'Verification invalidated' }[request.authorization_status] || 'Status unavailable'
+}
+
+export function withdrawalAmount(value) {
+  const text = String(value ?? '')
+  if (!/^\d+(\.\d+)?$/.test(text)) return '—'
+  const [whole, fraction = ''] = text.split('.')
+  const digits = fraction.replace(/0+$/, '')
+  return whole.replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (digits ? '.' + digits : '')
+}
