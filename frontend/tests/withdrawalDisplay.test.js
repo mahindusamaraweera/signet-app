@@ -16,3 +16,11 @@ test('live approvals and queued requests retain cancellation', () => {
   assert.equal(canCancelRequest({ authorization_status: 'authorized' }), true)
   assert.equal(canCancelRequest({ authorization_status: 'consumed', queue_status: 'pending' }), true)
 })
+
+test('expired approval guidance never overrides a queued or remote payment', async () => {
+  const { withdrawalRequestNotice } = await import('../src/utils/withdrawalDisplay.js')
+  assert.match(withdrawalRequestNotice({ authorization_status: 'expired' }), /Start a new withdrawal/)
+  assert.match(withdrawalRequestNotice({ authorization_status: 'invalidated' }), /security settings/)
+  assert.equal(withdrawalRequestNotice({ authorization_status: 'expired', queue_status: 'pending' }), '')
+  assert.equal(withdrawalRequestNotice({ authorization_status: 'expired', remote_withdrawal_id: '508' }), '')
+})

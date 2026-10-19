@@ -33,42 +33,54 @@ func (s *Service) PrepareWithdrawal(ctx context.Context, userID uint64, password
 		return PreparedWithdrawal{}, err
 	}
 	if !auth.CheckPassword(passwordHash, password) {
-		return PreparedWithdrawal{}, ErrSecurityCredentials
+		return PreparedWithdrawal{}, eligibility("withdrawal_password_incorrect", "The current password is incorrect. Enter your Signet account password.", ErrSecurityCredentials)
 	}
 	var verified, fingerprint sql.NullString
 	var verifiedAt, confirmed, hold sql.NullTime
 	var frozen bool
 	var version uint64
 	if err := tx.QueryRowContext(ctx, `SELECT verified_email,email_verified_at,authenticator_fingerprint,authenticator_confirmed_at,withdrawals_frozen,security_version,hold_until FROM withdrawal_security_profiles WHERE user_id=? FOR UPDATE`, userID).Scan(&verified, &verifiedAt, &fingerprint, &confirmed, &frozen, &version, &hold); err != nil {
+		if err == sql.ErrNoRows {
+			return PreparedWithdrawal{}, eligibility("withdrawal_security_setup_required", "Complete email, authenticator and address setup in Withdrawal security.", ErrSecurityCredentials)
+		}
 		return PreparedWithdrawal{}, err
 	}
-	if frozen || !verifiedAt.Valid || verified.String != email || !confirmed.Valid || (hold.Valid && now.Before(hold.Time)) {
-		return PreparedWithdrawal{}, ErrSecurityCredentials
+	if err := withdrawalProfileEligibility(email, verified, verifiedAt, confirmed, hold, frozen, now); err != nil {
+		return PreparedWithdrawal{}, err
 	}
 	var encrypted, previous, enrolledEmail string
 	var enrollmentVersion uint64
 	var enrolledConfirmed sql.NullTime
 	if err := tx.QueryRowContext(ctx, `SELECT encrypted_secret,previous_fingerprint,email,security_version,confirmed_at FROM withdrawal_authenticator_enrollments WHERE user_id=? FOR UPDATE`, userID).Scan(&encrypted, &previous, &enrolledEmail, &enrollmentVersion, &enrolledConfirmed); err != nil {
+		if err == sql.ErrNoRows {
+			return PreparedWithdrawal{}, eligibility("withdrawal_authenticator_setup_required", "Complete withdrawal authenticator setup in Withdrawal security.", ErrSecurityCredentials)
+		}
 		return PreparedWithdrawal{}, err
 	}
-	if !enrolledConfirmed.Valid || !confirmed.Time.Equal(enrolledConfirmed.Time) || enrolledEmail != email || enrollmentVersion == 0 || previous != secretFingerprint(s.key, legacy.String) {
-		return PreparedWithdrawal{}, ErrSecurityCredentials
+	if err := withdrawalEnrollmentEligibility(confirmed, enrolledConfirmed, email, enrolledEmail, enrollmentVersion, previous, secretFingerprint(s.key, legacy.String)); err != nil {
+		return PreparedWithdrawal{}, err
 	}
 	secret, err := decryptEnrollment(s.key, userID, enrollmentVersion, email, encrypted)
 	if err != nil {
-		return PreparedWithdrawal{}, err
+		return PreparedWithdrawal{}, eligibility("withdrawal_authenticator_unavailable", "Your withdrawal authenticator could not be validated. Contact support to check the withdrawal security configuration.", ErrSecurityCredentials)
 	}
 	if fingerprint.String != secretFingerprint(s.key, secret) {
-		return PreparedWithdrawal{}, ErrSecurityCredentials
+		return PreparedWithdrawal{}, eligibility("withdrawal_authenticator_changed", "Your withdrawal authenticator setup does not match your confirmed settings. Contact support to review Withdrawal security.", ErrSecurityCredentials)
 	}
 	var destination string
 	var eligible, verifiedAddress time.Time
 	var revoked sql.NullTime
 	if err := tx.QueryRowContext(ctx, `SELECT address,verified_at,eligible_at,revoked_at FROM withdrawal_security_addresses WHERE id=? AND user_id=? AND network='BSC' AND asset='SIGNET' FOR UPDATE`, addressID, userID).Scan(&destination, &verifiedAddress, &eligible, &revoked); err != nil {
+		if err == sql.ErrNoRows {
+			return PreparedWithdrawal{}, eligibility("withdrawal_address_missing", "This withdrawal address was not found. Refresh and select your verified address in Withdrawal security.", ErrSecurityCredentials)
+		}
 		return PreparedWithdrawal{}, err
 	}
-	if revoked.Valid || verifiedAddress.IsZero() || now.Before(eligible) {
-		return PreparedWithdrawal{}, ErrWithdrawalAddress
+	if err := withdrawalAddressEligibility(verifiedAddress, eligible, revoked, now); err != nil {
+		return PreparedWithdrawal{}, err
+	}
+	if err := assertNoPendingWithdrawal(ctx, tx, userID, ""); err != nil {
+		return PreparedWithdrawal{}, err
 	}
 	var recent int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM withdrawal_authorizations WHERE user_id=? AND created_at>=?`, userID, now.UTC().Add(-time.Minute)).Scan(&recent); err != nil {

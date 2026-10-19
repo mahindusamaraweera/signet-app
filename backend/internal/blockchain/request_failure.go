@@ -26,7 +26,7 @@ func requestFailure(res *http.Response, sentinel error, method, path string) err
 	_ = json.Unmarshal(data, &envelope)
 	code := "http_rejected"
 	switch envelope.Code {
-	case "withdrawal_signature_invalid", "withdrawal_key_unavailable", "withdrawal_assertion_time_invalid", "withdrawal_mapping_missing", "withdrawal_terms_conflict", "withdrawal_insufficient_balance", "withdrawal_custody_held", "withdrawal_cooldown_active", "withdrawal_limit_exceeded", "withdrawal_fee_destination_missing", "withdrawal_validation_or_configuration_failed":
+	case "withdrawal_already_processing", "withdrawal_signature_invalid", "withdrawal_key_unavailable", "withdrawal_assertion_time_invalid", "withdrawal_mapping_missing", "withdrawal_terms_conflict", "withdrawal_insufficient_balance", "withdrawal_custody_held", "withdrawal_cooldown_active", "withdrawal_limit_exceeded", "withdrawal_fee_destination_missing", "withdrawal_validation_or_configuration_failed":
 		code = envelope.Code
 	}
 	snippet := strings.Join(strings.Fields(string(data)), " ")
