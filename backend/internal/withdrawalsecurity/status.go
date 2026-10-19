@@ -7,6 +7,11 @@ import (
 )
 
 type Status struct {
+	AdmissionChecked       bool       `json:"withdrawal_admission_checked"`
+	ActiveWithdrawalID     *string    `json:"active_withdrawal_id"`
+	CooldownMinutes        int        `json:"withdrawal_cooldown_minutes"`
+	CooldownUntil          *time.Time `json:"withdrawal_cooldown_until"`
+	ServerTime             time.Time  `json:"server_time"`
 	EmailVerified          bool       `json:"email_verified"`
 	AuthenticatorConfirmed bool       `json:"authenticator_confirmed"`
 	Frozen                 bool       `json:"withdrawals_frozen"`
@@ -28,7 +33,7 @@ func (s *Service) Status(ctx context.Context, userID uint64) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	result := Status{EmailVerified: verifiedAt.Valid && verifiedEmail.String == email, Frozen: frozen.Bool}
+	result := Status{ServerTime: time.Now().UTC(), EmailVerified: verifiedAt.Valid && verifiedEmail.String == email, Frozen: frozen.Bool}
 	if hold.Valid {
 		result.HoldUntil = &hold.Time
 	}

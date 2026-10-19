@@ -12,6 +12,8 @@ func TestWithdrawalConfirmationDiagnostics(t *testing.T) {
 		err  error
 		code string
 	}{
+		{withdrawalsecurity.ErrWithdrawalEmailDelivery, "withdrawal_email_delivery_failed"},
+		{withdrawalsecurity.ErrChallengeCooldown, "withdrawal_request_cooldown"},
 		{withdrawalsecurity.ErrWithdrawalExpired, "withdrawal_request_expired"},
 		{withdrawalsecurity.ErrWithdrawalEmailExpired, "withdrawal_email_expired"},
 		{withdrawalsecurity.ErrWithdrawalEmailIncorrect, "withdrawal_email_incorrect"},
@@ -27,5 +29,18 @@ func TestWithdrawalConfirmationDiagnostics(t *testing.T) {
 		if code != c.code || message == "" || message == c.err.Error() {
 			t.Fatalf("unsafe or incorrect diagnostic: %s", code)
 		}
+	}
+}
+
+func TestWithdrawalWaitResponseIncludesStructuredDeadline(t *testing.T) {
+	err := &withdrawalsecurity.EligibilityError{Code: "withdrawal_security_wait", Message: "Waiting period active", AvailableAt: "2026-10-19T14:16:49Z"}
+	code, message := withdrawalConfirmationError(err)
+	response := withdrawalErrorResponse(err, code, message)
+	if response["available_at"] != err.AvailableAt || response["code"] != err.Code {
+		t.Fatal("missing structured wait deadline")
+	}
+	response = withdrawalErrorResponse(errors.New("private database failure"), "withdrawal_verification_failed", "Check status")
+	if len(response) != 2 {
+		t.Fatal("unexpected private diagnostic fields")
 	}
 }
