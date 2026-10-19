@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"signet-backend/internal/app"
 	"signet-backend/internal/auth"
 	"signet-backend/internal/httpx"
 	"signet-backend/internal/securitymail"
+	"signet-backend/internal/totp"
 	"signet-backend/internal/withdrawalsecurity"
 	"time"
 )
@@ -66,7 +68,8 @@ func withdrawalRequestHandler(d *app.Deps, action string) http.HandlerFunc {
 			return
 		case "confirm":
 			if err := d.WithdrawalSecurity.ConfirmWithdrawal(r.Context(), user.ID, body.Password, body.ID, body.Proof, body.Terms, body.ChallengeID, body.EmailCode, body.AuthenticatorCode, now); err != nil {
-				httpx.Error(w, 409, "Verification failed or request expired; check codes and security settings")
+				code, message := withdrawalConfirmationError(err)
+				httpx.JSON(w, 409, map[string]string{"message": message, "code": code})
 				return
 			}
 			httpx.JSON(w, 200, map[string]string{"status": "authorized", "id": body.ID})
@@ -81,5 +84,29 @@ func withdrawalRequestHandler(d *app.Deps, action string) http.HandlerFunc {
 		default:
 			httpx.Error(w, 404, "Not found")
 		}
+	}
+}
+
+// Only fixed diagnostics are returned; database errors and secrets stay private.
+func withdrawalConfirmationError(err error) (string, string) {
+	switch {
+	case errors.Is(err, withdrawalsecurity.ErrWithdrawalExpired):
+		return "withdrawal_request_expired", "This withdrawal request expired. Start a new withdrawal and use the new verification email."
+	case errors.Is(err, withdrawalsecurity.ErrWithdrawalEmailExpired):
+		return "withdrawal_email_expired", "Your email code expired. Request a new code, or start again if the withdrawal request has expired."
+	case errors.Is(err, withdrawalsecurity.ErrWithdrawalEmailSuperseded):
+		return "withdrawal_email_replaced", "A newer email code was sent. Use the latest verification email."
+	case errors.Is(err, withdrawalsecurity.ErrWithdrawalEmailAttempts):
+		return "withdrawal_email_attempts_exhausted", "Too many incorrect verification attempts. Request a new email code."
+	case errors.Is(err, withdrawalsecurity.ErrWithdrawalEmailUsed):
+		return "withdrawal_email_used", "This email code was already used. Check request status before trying again."
+	case errors.Is(err, withdrawalsecurity.ErrWithdrawalEmailIncorrect):
+		return "withdrawal_email_incorrect", "The email code is incorrect. Enter the 6-digit code from your latest withdrawal verification email."
+	case errors.Is(err, totp.ErrReusedCode):
+		return "withdrawal_authenticator_reused", "This authenticator code was already used. Wait for the next code, then enter it with your email code."
+	case errors.Is(err, totp.ErrInvalidCode):
+		return "withdrawal_authenticator_invalid", "The authenticator code is incorrect or expired. Enter the current code from your withdrawal authenticator and check your phone's automatic time setting."
+	default:
+		return "withdrawal_verification_failed", "Verification could not complete. Check your password and withdrawal security settings, then check request status before retrying."
 	}
 }

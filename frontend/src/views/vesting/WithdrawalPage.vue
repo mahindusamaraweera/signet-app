@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import api from '@/api/client'
+import { verifyAndQueueWithdrawal } from '@/utils/withdrawalSubmission'
 import { assetDisplay } from '@/utils/assetDisplay'
 import { canCancelRequest } from '@/utils/withdrawalDisplay'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
@@ -82,10 +83,17 @@ async function act(kind) {
       const body = { password: currentPassword, id: prepared.value.id, proof: prepared.value.proof, terms: prepared.value.terms }
       if (kind === 'email') {
         const { data } = await api.post('/blockchain/withdrawals/email', body)
-        if (stopped) return; challenge.value = data.challenge_id; message.value = 'Verification email sent. Enter your password again and both codes.'
+        if (stopped) return; challenge.value = data.challenge_id; message.value = 'Email code sent. Enter the newest email code, a fresh authenticator code and your password, then verify and submit.'
       } else if (kind === 'confirm') {
-        await api.post('/blockchain/withdrawals/confirm', { ...body, challenge_id: challenge.value, email_code: emailCode.value, authenticator_code: authCode.value })
-        if (stopped) return; stage.value = 'authorized'; emailCode.value = authCode.value = ''; message.value = 'Approved. Confirm queue submission below.'
+        const queued = await verifyAndQueueWithdrawal(api, body, { challenge_id: challenge.value, email_code: emailCode.value, authenticator_code: authCode.value }, () => {
+          if (stopped) return false
+          stage.value = 'authorized'; emailCode.value = authCode.value = ''
+          return true
+        })
+        if (!queued) return
+        if (stopped) return
+        clearProof(); stage.value = 'queued'; message.value = 'Withdrawal submitted. Security checks and payment processing will continue automatically.'
+        await requestStatus()
       } else if (kind === 'queue') {
         await api.post('/blockchain/withdrawals/queue', body)
         if (stopped) return; clearProof(); stage.value = 'queued'; message.value = 'Queued for custody reservation, security checks and ledger audit. This is not a completed payout.'
@@ -131,18 +139,20 @@ onBeforeUnmount(() => { stopped = true; clearProof(); cancelPassword.value = '';
     <p v-if="error" role="alert" class="alert alert-danger">{{ error }}</p><p v-if="message" role="status" class="alert alert-info">{{ message }}</p>
     <button class="btn btn-outline-secondary mb-3" :disabled="busy" @click="refresh">Check status</button>
     <section v-if="enabled && stage !== 'queued'" class="card p-3 mb-4">
+      <h2 class="h5">{{ !prepared ? '1. Review withdrawal' : stage === 'authorized' ? '3. Submit approved withdrawal' : challenge ? '3. Verify and submit' : '2. Get email code' }}</h2>
+      <p v-if="prepared" class="small">Complete verification before {{ new Date(prepared.expires_at).toLocaleTimeString() }}. Only the latest email code works.</p>
       <template v-if="!prepared">
         <label for="withdraw-address">Verified eligible address</label><select id="withdraw-address" v-model="addressId" class="form-select mb-3" :disabled="busy"><option value="">Select address</option><option v-for="a in activeAddresses" :key="a.id" :value="a.id">{{ a.address }}</option></select>
         <label for="withdraw-amount">Gross SIGNET amount (fee included)</label><input id="withdraw-amount" v-model="amount" inputmode="decimal" class="form-control mb-3" :disabled="busy" />
       </template>
       <template v-else><p class="text-break">Destination: {{ prepared.terms.destination }}</p><p>Gross: {{ prepared.terms.gross }} SIGNET<br>3% fee: {{ prepared.terms.fee }} SIGNET<br>You receive: {{ prepared.terms.net }} SIGNET</p><p>Approval expires: {{ prepared.expires_at }}</p></template>
-      <label for="withdraw-password">Current password (enter again for each action)</label><input id="withdraw-password" v-model="password" type="password" autocomplete="current-password" maxlength="72" class="form-control mb-3" :disabled="busy" />
+      <label for="withdraw-password">Current password</label><input id="withdraw-password" v-model="password" type="password" autocomplete="current-password" maxlength="72" class="form-control mb-3" :disabled="busy" />
       <button v-if="!prepared" class="btn btn-primary" :disabled="busy || uncertain || pendingQueue || !password || !addressId || !/^[0-9]{1,18}(\.[0-9]{1,18})?$/.test(amount)" @click="act('prepare')">Review exact withdrawal</button>
       <template v-else-if="stage === 'prepared'">
-        <button class="btn btn-primary mb-3" :disabled="busy || uncertain || !password" @click="act('email')">Send withdrawal verification email</button>
-        <template v-if="challenge"><label for="withdraw-email">Email code</label><input id="withdraw-email" v-model="emailCode" maxlength="6" inputmode="numeric" autocomplete="one-time-code" class="form-control mb-3" :disabled="busy" /><label for="withdraw-auth">Authenticator code</label><input id="withdraw-auth" v-model="authCode" maxlength="6" inputmode="numeric" autocomplete="off" class="form-control mb-3" :disabled="busy" /><button class="btn btn-primary" :disabled="busy || uncertain || !password || !/^\d{6}$/.test(emailCode) || !/^\d{6}$/.test(authCode)" @click="act('confirm')">Verify this exact request</button></template>
+        <button class="btn btn-primary mb-3" :disabled="busy || uncertain || !password" @click="act('email')">{{ challenge ? 'Send new email code' : 'Send verification email' }}</button>
+        <template v-if="challenge"><label for="withdraw-email">Email code</label><input id="withdraw-email" v-model="emailCode" maxlength="6" inputmode="numeric" autocomplete="one-time-code" class="form-control mb-3" :disabled="busy" /><label for="withdraw-auth">Authenticator code</label><p class="small">Use the current code from your withdrawal authenticator. If you already used it, wait for the next code.</p><input id="withdraw-auth" v-model="authCode" maxlength="6" inputmode="numeric" autocomplete="off" class="form-control mb-3" :disabled="busy" /><button class="btn btn-primary" :disabled="busy || uncertain || !password || !/^\d{6}$/.test(emailCode) || !/^\d{6}$/.test(authCode)" @click="act('confirm')">Verify and submit withdrawal</button></template>
       </template>
-      <button v-else-if="stage === 'authorized'" class="btn btn-primary" :disabled="busy || uncertain || !password" @click="act('queue')">Queue approved withdrawal</button>
+      <button v-else-if="stage === 'authorized'" class="btn btn-primary" :disabled="busy || uncertain || !password" @click="act('queue')">Submit approved withdrawal</button>
     </section>
     <h2 class="h5 mt-4">Recent withdrawal requests</h2><p>Payout status comes from custody. Submitted means reserved, awaiting processing. Older payouts are available in payout and fee history.</p>
     <p v-if="historyError" role="status" class="alert alert-warning">{{ historyError }}</p>
