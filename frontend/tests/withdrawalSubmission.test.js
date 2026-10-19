@@ -24,3 +24,36 @@ test('leaving the page after verification prevents queue submission', async () =
   assert.equal(await verifyAndQueueWithdrawal({ post: async p => calls.push(p) }, {}, {}, () => false), false)
   assert.equal(calls.length, 1)
 })
+
+test('only explicit code failures allow retry before approval', async () => {
+  const { withdrawalCodeRetry } = await import('../src/utils/withdrawalSubmission.js')
+  for (const [code, field] of [['withdrawal_email_incorrect', 'email'], ['withdrawal_authenticator_invalid', 'authenticator'], ['withdrawal_authenticator_reused', 'authenticator']]) {
+    const error = { response: { status: 409, data: { code } } }
+    assert.equal(withdrawalCodeRetry(error, 'confirm', 'prepared').field, field)
+    assert.equal(withdrawalCodeRetry(error, 'confirm', 'authorized'), null)
+    assert.equal(withdrawalCodeRetry(error, 'queue', 'prepared'), null)
+    const calls = []
+    await assert.rejects(verifyAndQueueWithdrawal({ post: async path => { calls.push(path); throw error } }, {}, {}, () => true))
+    assert.deepEqual(calls, ['/blockchain/withdrawals/confirm'])
+  }
+  assert.equal(withdrawalCodeRetry(new Error('network'), 'confirm', 'prepared'), null)
+  assert.equal(withdrawalCodeRetry({ response: { status: 409, data: { code: 'withdrawal_verification_failed' } } }, 'confirm', 'prepared'), null)
+})
+
+test('a corrected code retries the same approval and queues exactly once', async () => {
+  const calls = [], body = { id: 'original-approval', proof: 'original-proof', terms: { gross: '78000' } }
+  let rejectCode = true
+  const api = { post: async (path, data) => {
+    calls.push([path, data])
+    if (path.endsWith('/confirm') && rejectCode) {
+      rejectCode = false
+      throw { response: { status: 409, data: { code: 'withdrawal_authenticator_invalid' } } }
+    }
+  } }
+  await assert.rejects(verifyAndQueueWithdrawal(api, body, { email_code: '123456', authenticator_code: '000000' }, () => true))
+  assert.equal(calls.length, 1)
+  await verifyAndQueueWithdrawal(api, body, { email_code: '123456', authenticator_code: '654321' }, () => true)
+  assert.deepEqual(calls.map(([path]) => path), ['/blockchain/withdrawals/confirm', '/blockchain/withdrawals/confirm', '/blockchain/withdrawals/queue'])
+  assert.equal(calls.every(([, data]) => data.id === body.id), true)
+  assert.deepEqual(calls[2][1], body)
+})
