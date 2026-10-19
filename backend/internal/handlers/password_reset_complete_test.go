@@ -28,10 +28,16 @@ func TestPasswordResetRejectsExpiredOrFutureProofWithoutMutation(t *testing.T) {
 }
 
 func TestPasswordResetSuccessAndAtomicFailureBoundaries(t *testing.T) {
-	for _, failure := range []string{"", "password", "profile", "challenges", "authorizations", "token deletion", "audit"} {
+	for _, failure := range []string{"", "short hold", "password", "profile", "challenges", "authorizations", "token deletion", "audit"} {
 		t.Run("failure="+failure, func(t *testing.T) {
 			now := time.Unix(1800000000, 0).UTC()
 			hold := now.Add(72 * time.Hour)
+			expectedHold := hold
+			if failure == "short hold" {
+				hold = now.Add(time.Hour)
+				expectedHold = now.Add(24 * time.Hour)
+				failure = ""
+			}
 			steps := []commissionSQLStep{
 				{contains: "SELECT id FROM users", columns: []string{"id"}, values: []driver.Value{int64(42)}, args: []driver.Value{"user@example.com"}},
 				{contains: "SELECT created_at FROM password_reset", columns: []string{"created_at"}, values: []driver.Value{now.Add(-time.Minute)}, args: []driver.Value{"user@example.com", "reset-token"}},
@@ -48,7 +54,7 @@ func TestPasswordResetSuccessAndAtomicFailureBoundaries(t *testing.T) {
 					}
 					return nil
 				}}},
-				{"profile", commissionSQLStep{contains: "SET security_version=security_version+1,hold_until", args: []driver.Value{hold, int64(42), int64(2)}}},
+				{"profile", commissionSQLStep{contains: "SET security_version=security_version+1,hold_until", args: []driver.Value{expectedHold, int64(42), int64(2)}}},
 				{"challenges", commissionSQLStep{contains: "UPDATE withdrawal_security_challenges", args: []driver.Value{int64(42)}}},
 				{"authorizations", commissionSQLStep{contains: "UPDATE withdrawal_authorizations", args: []driver.Value{int64(42)}}},
 				{"token deletion", commissionSQLStep{contains: "DELETE FROM password_reset", args: []driver.Value{"user@example.com"}}},
