@@ -4,7 +4,6 @@ import QRCode from 'qrcode'
 import WithdrawalCountdown from '@/components/WithdrawalCountdown.vue'
 import { useWithdrawalClock } from '@/composables/useWithdrawalClock'
 import { localDeadline } from '@/utils/withdrawalTime'
-import { pastedAuthenticatorCode } from '@/utils/authenticatorCode'
 const { now, sync } = useWithdrawalClock()
 import api from '@/api/client'
 import DashboardLayout from '@/components/layout/DashboardLayout.vue'
@@ -51,8 +50,6 @@ async function action(kind) {
       if (stopped) return
       challenge.value = data.challenge_id
       emailCode.value = ''
-      setup.value = null
-      qr.value = ''
       message.value = data.message
     } else if (kind === 'setup') {
       const { data } = await api.post('/blockchain/security/authenticator', { password: currentPassword, challenge_id: challenge.value, email_code: emailCode.value })
@@ -107,17 +104,6 @@ async function action(kind) {
       await refresh()
     } else { await refresh() }
   } catch (err) {
-    if (kind === 'confirm' && !stopped) {
-      try {
-        await refresh()
-        if (status.value?.authenticator_confirmed) {
-          setup.value = null
-          qr.value = authCode.value = ''
-          message.value = 'Authenticator is confirmed.'
-          return
-        }
-      } catch { /* Preserve the original error if status refresh also fails. */ }
-    }
     if (!stopped) error.value = err?.response?.data?.message || 'Security setup temporarily unavailable. Please try again.'
   } finally { if (!stopped) busy.value = false }
 }
@@ -165,8 +151,7 @@ onBeforeUnmount(() => {
         <p v-if="setup.secret" class="text-break">Manual setup secret: {{ setup.secret }}</p>
         <p>Setup expires at {{ localDeadline(setup.expires_at) }} (your local time).</p>
         <label for="security-auth-code">Authenticator code</label>
-        <input id="security-auth-code" v-model="authCode" inputmode="numeric" autocomplete="off" maxlength="6" class="form-control mb-3" :disabled="busy" @paste.prevent="authCode = pastedAuthenticatorCode($event.clipboardData.getData('text'))" />
-        <p class="small">Use the authenticator entry from this setup. Keep this QR open while retrying a code.</p>
+        <input id="security-auth-code" v-model="authCode" inputmode="numeric" autocomplete="off" maxlength="6" class="form-control mb-3" :disabled="busy" />
         <button class="btn btn-primary" :disabled="busy || !password || !/^\d{6}$/.test(authCode)" @click="action('confirm')">Confirm authenticator</button>
       </template>
     </section>
