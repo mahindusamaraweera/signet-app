@@ -45,6 +45,14 @@ func withdrawalAuthenticatorHandler(d *app.Deps, confirm bool) http.HandlerFunc 
 			httpx.Error(w, 429, "Please wait before starting another setup")
 			return
 		}
+		if errors.Is(err, totp.ErrInvalidCode) {
+			httpx.JSON(w, 422, map[string]interface{}{"code": "authenticator_code_incorrect", "message": "The code did not match this setup. Enter the current six-digit code from the authenticator entry you just scanned."})
+			return
+		}
+		if errors.Is(err, totp.ErrReusedCode) {
+			httpx.JSON(w, 422, map[string]interface{}{"code": "authenticator_code_reused", "message": "This authenticator code was already used. Wait for the next code from the same entry."})
+			return
+		}
 		if errors.Is(err, withdrawalsecurity.ErrAuthenticatorEnrollment) || errors.Is(err, withdrawalsecurity.ErrSecurityCredentials) || errors.Is(err, withdrawalsecurity.ErrInvalidChallenge) || errors.Is(err, totp.ErrInvalidOrReusedCode) {
 			httpx.Error(w, 422, "Security proof is invalid, expired, reused or ineligible. Confirmed authenticators cannot be reset here.")
 			return
