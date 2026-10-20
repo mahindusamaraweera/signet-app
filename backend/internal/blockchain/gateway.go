@@ -171,7 +171,7 @@ func (g *Gateway) request(ctx context.Context, method, path, key string, body in
 	// "purchase intent N: …" worker log explains an activation_sync_unavailable.
 	res, err := g.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %s %s: %v", ErrUnavailable, method, path, err)
+		return fmt.Errorf("%w: %s %s: %w", ErrUnavailable, method, path, err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusUnprocessableEntity {
