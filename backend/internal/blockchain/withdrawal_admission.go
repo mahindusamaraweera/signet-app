@@ -8,6 +8,8 @@ import (
 )
 
 type WithdrawalAdmission struct {
+	KycRequired        *bool      `json:"kyc_required"`
+	KycVerified        *bool      `json:"kyc_verified"`
 	ServerTime         time.Time  `json:"server_time"`
 	CooldownMinutes    *int       `json:"cooldown_minutes"`
 	CooldownUntil      *time.Time `json:"cooldown_until"`
@@ -32,7 +34,10 @@ func (g *Gateway) WithdrawalAdmission(ctx context.Context, userID uint64) (Withd
 			return state, ErrUnavailable
 		}
 	}
-	blocked := state.ActiveWithdrawalID != nil || (state.CooldownUntil != nil && state.CooldownUntil.After(state.ServerTime))
+	if state.KycRequired == nil || state.KycVerified == nil {
+		return state, ErrUnavailable
+	}
+	blocked := (state.KycRequired != nil && *state.KycRequired && !*state.KycVerified) || state.ActiveWithdrawalID != nil || (state.CooldownUntil != nil && state.CooldownUntil.After(state.ServerTime))
 	if *state.CanRequest == blocked {
 		return state, ErrUnavailable
 	}
