@@ -1,547 +1,80 @@
-// kyc_handler.go covers KycController (api_spec.md "## KycController").
-//
-// Auth decision: the original left verify/unverify/create/edit/store/
-// update/destroy completely unguarded (anyone, including guests, could
-// verify a KYC record) and index/show relied on `auth()->check()`
-// defensively with a guest-facing branch. Per BACKEND_CONVENTIONS.md this
-// port requires a session on every kyc.* route, including index/show —
-// the "simplest/safest, be consistent" option explicitly offered in the
-// task brief. That means the original's guest branch of index/show never
-// triggers here; the role branch (company vs non-company) is preserved.
 package handlers
 
 import (
-	"errors"
-	"io"
-	"log"
+	"database/sql"
 	"net/http"
-	"path/filepath"
-	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
-
 	"signet-backend/internal/app"
 	"signet-backend/internal/auth"
 	"signet-backend/internal/httpx"
 	"signet-backend/internal/models"
-	"signet-backend/internal/storage"
 )
 
-const kycMaxUploadBytes = 20 << 20 // 20MB total multipart form
-
+// KYC is now a read-only view of the authenticated user's connected Tier account.
+// Historical records/files are retained; upload and local approval are retired.
 func RegisterKycRoutes(r chi.Router, d *app.Deps) {
-	// Serves files saved by kycStoreFile below (mirrors the original's
-	// `public` disk under kyc/nic_front, kyc/nic_back, kyc/passport),
-	// from local disk or S3 depending on STORAGE_DRIVER.
-	r.Get("/storage/kyc/*", kycServeFile(d.Storage))
-
+	r.Get("/storage/kyc/*", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	r.Group(func(r chi.Router) {
-		r.Use(d.Auth.RequireAuth) // deliberately required on every route below — see file header
-
-		r.Get("/api/v1/kyc", kycIndexHandler(d, false))
-		// kyc.show is kyc.index plus, for non-company users, their active
-		// packages' Telegram links (KycController@show).
-		r.Get("/api/v1/kyc/show", kycIndexHandler(d, true))
-		r.Get("/api/v1/kyc/create", kycCreateHandler(d))
-		r.Get("/api/v1/kyc/{id}/edit", kycEditHandler(d))
-		r.Post("/api/v1/kyc", kycStoreHandler(d))
-		r.Put("/api/v1/kyc/{id}", kycUpdateHandler(d))
-		r.Delete("/api/v1/kyc/{id}", kycDestroyHandler(d))
-		r.Post("/api/v1/kyc/{id}/verify", kycVerifyHandler(d))
-		r.Post("/api/v1/kyc/{id}/unverify", kycUnverifyHandler(d))
-
-		r.Group(func(r chi.Router) {
-			r.Use(auth.RequireRole("company"))
-			r.Get("/api/v1/kyc/verified", kycVerifiedHandler(d))
-		})
+		r.Use(d.Auth.RequireAuth)
+		r.Get("/api/v1/kyc", linkedTierKycHandler(d))
+		r.Get("/api/v1/kyc/show", linkedTierKycHandler(d))
+		for _, path := range []string{"/api/v1/kyc/create", "/api/v1/kyc/verified", "/api/v1/kyc/{id}/edit"} {
+			r.Get(path, retiredKycHandler)
+		}
+		r.Post("/api/v1/kyc", retiredKycHandler)
+		r.Put("/api/v1/kyc/{id}", retiredKycHandler)
+		r.Delete("/api/v1/kyc/{id}", retiredKycHandler)
+		r.Post("/api/v1/kyc/{id}/verify", retiredKycHandler)
+		r.Post("/api/v1/kyc/{id}/unverify", retiredKycHandler)
 	})
 }
-
-// GET /kyc (kyc.index) — KycController@index (also mounted at /kyc/show,
-// see RegisterKycRoutes).
-//
-// If the logged-in user's role != 'company': fetch their own single Kyc
-// row (0 or 1 of them). Else (role == 'company'): paginated list of
-// unverified KYCs belonging to non-company users.
-// kycAlert is the page-load SweetAlert the original raises with
-// Alert::info/success/warning(title, text).
-func kycAlert(icon, title, text string) map[string]string {
-	return map[string]string{"icon": icon, "title": title, "text": text}
+func retiredKycHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.JSON(w, http.StatusGone, map[string]string{"code": "kyc_method_retired", "message": "Identity verification is managed through your connected Tier account. Open Identity verification to continue."})
 }
-
-func kycIndexHandler(d *app.Deps, withTelegramLinks bool) http.HandlerFunc {
+func linkedTierKycHandler(d *app.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, private")
 		user := auth.UserFromContext(r.Context())
-
-		if user.Role != "company" {
-			var kycs []models.Kyc
-			_ = d.DB.Select(&kycs, "SELECT * FROM kycs WHERE user_id = ? LIMIT 1", user.ID)
-
-			alert := kycAlert("info", "Info", "You have not submitted KYC yet.")
-			if len(kycs) == 1 {
-				if kycs[0].IsVerified {
-					alert = kycAlert("success", "Verified", "Your KYC is verified.")
-				} else {
-					alert = kycAlert("warning", "Pending", "Your KYC is not yet verified.")
-				}
-			}
-			out := map[string]interface{}{"status": "success", "alert": alert, "kycs": kycs}
-			if withTelegramLinks {
-				// One "Join Telegram" button per ACTIVE user package:
-				// $userPackage->userpackage->telegram_link ?? 'N/A'.
-				var links []models.NullString
-				_ = d.DB.Select(&links, `
-					SELECT p.telegram_link FROM user_packages up
-					LEFT JOIN packages p ON p.id = CAST(up.package AS UNSIGNED)
-					WHERE up.user_id = ? AND up.status = 'active'
-					ORDER BY up.id`, user.ID)
-				telegramLinks := make([]string, 0, len(links))
-				for _, l := range links {
-					if l.Valid {
-						telegramLinks = append(telegramLinks, l.String)
-					} else {
-						telegramLinks = append(telegramLinks, "N/A")
+		if user == nil {
+			httpx.Error(w, 401, "Authentication required")
+			return
+		}
+		if d.Blockchain == nil {
+			httpx.Error(w, 503, "Tier identity verification is temporarily unavailable")
+			return
+		}
+		var localTierID string
+		err := d.DB.Get(&localTierID, "SELECT tier_user_id FROM tier_account_links WHERE user_id=?", user.ID)
+		if err == sql.ErrNoRows {
+			httpx.JSON(w, 200, map[string]interface{}{"linked": false, "verified": false, "status": "not_linked", "telegram_links": []string{}})
+			return
+		}
+		if err != nil {
+			httpx.Error(w, 503, "Account connection could not be checked")
+			return
+		}
+		state, err := syncTierIdentity(r.Context(), d, user.ID)
+		if err != nil || state.TierUserID == nil || !*state.Linked || *state.TierUserID != localTierID {
+			httpx.Error(w, 503, "Tier verification could not be confirmed. Refresh shortly or check your Tier account connection.")
+			return
+		}
+		// Preserve package community links, gated by the new authoritative approval.
+		links := []string{}
+		if *state.Verified {
+			var rows []models.NullString
+			err := d.DB.Select(&rows, `SELECT p.telegram_link FROM user_packages up LEFT JOIN packages p ON p.id = CAST(up.package AS UNSIGNED) WHERE up.user_id = ? AND up.status = 'active' ORDER BY up.id`, user.ID)
+			if err == nil {
+				for _, row := range rows {
+					if row.Valid {
+						links = append(links, row.String)
 					}
 				}
-				out["telegram_links"] = telegramLinks
-			}
-			httpx.OK(w, out)
-			return
-		}
-
-		page, perPage, offset := httpx.PageParams(r, 10)
-		var total int
-		_ = d.DB.Get(&total, `
-			SELECT COUNT(*) FROM kycs k JOIN users u ON u.id = k.user_id
-			WHERE k.is_verified = 0 AND u.role != 'company'`)
-		var kycs []models.Kyc
-		_ = d.DB.Select(&kycs, `
-			SELECT k.* FROM kycs k JOIN users u ON u.id = k.user_id
-			WHERE k.is_verified = 0 AND u.role != 'company'
-			ORDER BY k.id LIMIT ? OFFSET ?`, perPage, offset)
-
-		alert := kycAlert("success", "Success", "KYC records retrieved successfully.")
-		if total == 0 {
-			alert = kycAlert("info", "Info", "No KYC records found.")
-		}
-		httpx.OK(w, map[string]interface{}{"status": "success", "alert": alert, "kycs": httpx.Paginate(kycs, total, page, perPage)})
-	}
-}
-
-// GET /kyc/verified (kyc.verified) — KycController@verified
-func kycVerifiedHandler(d *app.Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		page, perPage, offset := httpx.PageParams(r, 10)
-		var total int
-		_ = d.DB.Get(&total, `
-			SELECT COUNT(*) FROM kycs k JOIN users u ON u.id = k.user_id
-			WHERE k.is_verified = 1 AND u.role != 'company'`)
-		var kycs []models.Kyc
-		_ = d.DB.Select(&kycs, `
-			SELECT k.* FROM kycs k JOIN users u ON u.id = k.user_id
-			WHERE k.is_verified = 1 AND u.role != 'company'
-			ORDER BY k.id LIMIT ? OFFSET ?`, perPage, offset)
-
-		alert := kycAlert("success", "Success", "KYC records retrieved successfully.")
-		if total == 0 {
-			alert = kycAlert("info", "Info", "No KYC records found.")
-		}
-		httpx.OK(w, map[string]interface{}{"status": "success", "alert": alert, "kycs": httpx.Paginate(kycs, total, page, perPage)})
-	}
-}
-
-// GET /kyc/create (kyc.create) — KycController@create — no data, just the form.
-func kycCreateHandler(d *app.Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		httpx.OK(w, map[string]interface{}{"status": "success"})
-	}
-}
-
-// GET /kyc/{id}/edit (kyc.edit) — Kyc::where('user_id', auth()->id())->findOrFail($id)
-func kycEditHandler(d *app.Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user := auth.UserFromContext(r.Context())
-		id, ok := parseUintParam(chi.URLParam(r, "id"))
-		if !ok {
-			httpx.Error(w, http.StatusBadRequest, "Invalid kyc id")
-			return
-		}
-		var kyc models.Kyc
-		if err := d.DB.Get(&kyc, "SELECT * FROM kycs WHERE id = ? AND user_id = ?", id, user.ID); err != nil {
-			httpx.Error(w, http.StatusNotFound, "Kyc not found")
-			return
-		}
-		httpx.OK(w, map[string]interface{}{"status": "success", "kyc": kyc})
-	}
-}
-
-// POST /kyc (kyc.store) — KycController@store
-func kycStoreHandler(d *app.Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user := auth.UserFromContext(r.Context())
-		if err := r.ParseMultipartForm(kycMaxUploadBytes); err != nil {
-			httpx.Error(w, http.StatusBadRequest, "Invalid form data")
-			return
-		}
-
-		fullName := strings.TrimSpace(r.FormValue("full_name"))
-		email := strings.TrimSpace(r.FormValue("email"))
-		contact1 := strings.TrimSpace(r.FormValue("contact_number1"))
-		contact2 := strings.TrimSpace(r.FormValue("contact_number2"))
-		address := r.FormValue("address")
-		telegram := r.FormValue("telegram_username")
-		docType := r.FormValue("document_type")
-		docNumber := strings.TrimSpace(r.FormValue("document_number"))
-
-		errs := map[string][]string{}
-		if fullName == "" {
-			errs["full_name"] = []string{"The full name field is required."}
-		}
-		if !emailRe.MatchString(email) {
-			errs["email"] = []string{"The email field must be a valid email address."}
-		}
-		if contact1 == "" {
-			errs["contact_number1"] = []string{"The contact number1 field is required."}
-		}
-		if docType != "nic" && docType != "passport" {
-			errs["document_type"] = []string{"The selected document type is invalid."}
-		}
-		if docNumber == "" {
-			errs["document_number"] = []string{"The document number field is required."}
-		} else {
-			var dupe int
-			_ = d.DB.Get(&dupe, "SELECT COUNT(*) FROM kycs WHERE document_number = ?", docNumber)
-			if dupe > 0 {
-				errs["document_number"] = []string{"The document number has already been taken."}
 			}
 		}
-		if docType == "nic" {
-			if _, _, err := r.FormFile("nic_front"); err != nil {
-				errs["nic_front"] = []string{"The nic front field is required."}
-			}
-			if _, _, err := r.FormFile("nic_back"); err != nil {
-				errs["nic_back"] = []string{"The nic back field is required."}
-			}
-		}
-		if docType == "passport" {
-			if _, _, err := r.FormFile("passport_image"); err != nil {
-				errs["passport_image"] = []string{"The passport image field is required."}
-			}
-		}
-		kycValidateImages(r, errs)
-		if len(errs) > 0 {
-			httpx.ValidationError(w, errs)
-			return
-		}
-
-		nicFrontPath, err := kycStoreFile(r, d.Storage, "nic_front", "nic_front")
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not store nic_front")
-			return
-		}
-		nicBackPath, err := kycStoreFile(r, d.Storage, "nic_back", "nic_back")
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not store nic_back")
-			return
-		}
-		passportPath, err := kycStoreFile(r, d.Storage, "passport_image", "passport")
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not store passport_image")
-			return
-		}
-
-		_, err = d.DB.Exec(`
-			INSERT INTO kycs (user_id, full_name, email, contact_number1, contact_number2, address,
-				telegram_username, document_type, document_number, nic_front, nic_back, passport_image,
-				is_verified, created_at, updated_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,NOW(),NOW())`,
-			user.ID, fullName, email, contact1, kycNullStr(contact2), address, telegram, docType, docNumber,
-			kycNullStr(nicFrontPath), kycNullStr(nicBackPath), kycNullStr(passportPath))
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not submit KYC")
-			return
-		}
-
-		httpx.OK(w, map[string]interface{}{"status": "success", "message": "KYC submitted. Pending verification."})
+		httpx.JSON(w, 200, map[string]interface{}{"linked": *state.Linked, "verified": *state.Verified, "status": state.Status,
+			"withdrawal_required": *state.WithdrawalRequired, "environment": state.Environment, "level": state.Level,
+			"checked_at": state.CheckedAt, "valid_until": state.ValidUntil, "verification_url": state.VerificationURL, "telegram_links": links})
 	}
-}
-
-// PUT /kyc/{id} (kyc.update) — KycController@update. Old files on disk are
-// NOT deleted when a new one is uploaded — preserved verbatim per
-// api_spec.md's documented storage-leak note, not fixed here.
-func kycUpdateHandler(d *app.Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user := auth.UserFromContext(r.Context())
-		id, ok := parseUintParam(chi.URLParam(r, "id"))
-		if !ok {
-			httpx.Error(w, http.StatusBadRequest, "Invalid kyc id")
-			return
-		}
-		var kyc models.Kyc
-		if err := d.DB.Get(&kyc, "SELECT * FROM kycs WHERE id = ? AND user_id = ?", id, user.ID); err != nil {
-			httpx.Error(w, http.StatusNotFound, "Kyc not found")
-			return
-		}
-
-		if err := r.ParseMultipartForm(kycMaxUploadBytes); err != nil {
-			httpx.Error(w, http.StatusBadRequest, "Invalid form data")
-			return
-		}
-
-		fullName := strings.TrimSpace(r.FormValue("full_name"))
-		email := strings.TrimSpace(r.FormValue("email"))
-		contact1 := strings.TrimSpace(r.FormValue("contact_number1"))
-		contact2 := strings.TrimSpace(r.FormValue("contact_number2"))
-		address := r.FormValue("address")
-		telegram := r.FormValue("telegram_username")
-		docType := r.FormValue("document_type")
-		docNumber := strings.TrimSpace(r.FormValue("document_number"))
-
-		errs := map[string][]string{}
-		if fullName == "" {
-			errs["full_name"] = []string{"The full name field is required."}
-		}
-		if !emailRe.MatchString(email) {
-			errs["email"] = []string{"The email field must be a valid email address."}
-		}
-		if contact1 == "" {
-			errs["contact_number1"] = []string{"The contact number1 field is required."}
-		}
-		if docType != "nic" && docType != "passport" {
-			errs["document_type"] = []string{"The selected document type is invalid."}
-		}
-		if docNumber == "" {
-			errs["document_number"] = []string{"The document number field is required."}
-		} else {
-			var dupe int
-			_ = d.DB.Get(&dupe, "SELECT COUNT(*) FROM kycs WHERE document_number = ? AND id != ?", docNumber, id)
-			if dupe > 0 {
-				errs["document_number"] = []string{"The document number has already been taken."}
-			}
-		}
-		kycValidateImages(r, errs)
-		if len(errs) > 0 {
-			httpx.ValidationError(w, errs)
-			return
-		}
-
-		nicFront := kyc.NicFront
-		if p, err := kycStoreFile(r, d.Storage, "nic_front", "nic_front"); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not store nic_front")
-			return
-		} else if p != "" {
-			nicFront = models.NullString{String: p, Valid: true}
-		}
-		nicBack := kyc.NicBack
-		if p, err := kycStoreFile(r, d.Storage, "nic_back", "nic_back"); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not store nic_back")
-			return
-		} else if p != "" {
-			nicBack = models.NullString{String: p, Valid: true}
-		}
-		passport := kyc.PassportImage
-		if p, err := kycStoreFile(r, d.Storage, "passport_image", "passport"); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not store passport_image")
-			return
-		} else if p != "" {
-			passport = models.NullString{String: p, Valid: true}
-		}
-
-		_, err := d.DB.Exec(`
-			UPDATE kycs SET full_name=?, email=?, contact_number1=?, contact_number2=?, address=?,
-				telegram_username=?, document_type=?, document_number=?, nic_front=?, nic_back=?,
-				passport_image=?, updated_at=NOW()
-			WHERE id = ?`,
-			fullName, email, contact1, kycNullStr(contact2), address, telegram, docType, docNumber,
-			nicFront, nicBack, passport, id)
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not update KYC")
-			return
-		}
-
-		httpx.OK(w, map[string]interface{}{"status": "success", "message": "KYC updated"})
-	}
-}
-
-// DELETE /kyc/{id} (kyc.destroy) — Kyc::where('user_id',auth()->id())->findOrFail($id)->delete()
-func kycDestroyHandler(d *app.Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user := auth.UserFromContext(r.Context())
-		id, ok := parseUintParam(chi.URLParam(r, "id"))
-		if !ok {
-			httpx.Error(w, http.StatusBadRequest, "Invalid kyc id")
-			return
-		}
-		res, err := d.DB.Exec("DELETE FROM kycs WHERE id = ? AND user_id = ?", id, user.ID)
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not delete KYC")
-			return
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			httpx.Error(w, http.StatusNotFound, "Kyc not found")
-			return
-		}
-		httpx.OK(w, map[string]interface{}{"status": "success", "message": "KYC deleted."})
-	}
-}
-
-// POST /kyc/{id}/verify (kyc.verify) — no ownership/role check in the
-// original beyond findOrFail; here it's gated to any authenticated user
-// (the deliberate fix), not narrowed to company/admin, since the original
-// had no role gate at all — only the missing-auth gap is closed.
-func kycVerifyHandler(d *app.Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, ok := parseUintParam(chi.URLParam(r, "id"))
-		if !ok {
-			httpx.Error(w, http.StatusBadRequest, "Invalid kyc id")
-			return
-		}
-		res, err := d.DB.Exec("UPDATE kycs SET is_verified = 1, updated_at = NOW() WHERE id = ?", id)
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not verify KYC")
-			return
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			httpx.Error(w, http.StatusNotFound, "Kyc not found")
-			return
-		}
-		httpx.OK(w, map[string]interface{}{"status": "success", "message": "KYC verified successfully."})
-	}
-}
-
-// POST /kyc/{id}/unverify (kyc.unverify)
-func kycUnverifyHandler(d *app.Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, ok := parseUintParam(chi.URLParam(r, "id"))
-		if !ok {
-			httpx.Error(w, http.StatusBadRequest, "Invalid kyc id")
-			return
-		}
-		res, err := d.DB.Exec("UPDATE kycs SET is_verified = 0, updated_at = NOW() WHERE id = ?", id)
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "Could not unverify KYC")
-			return
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			httpx.Error(w, http.StatusNotFound, "Kyc not found")
-			return
-		}
-		httpx.OK(w, map[string]interface{}{"status": "success", "message": "KYC unverified successfully."})
-	}
-}
-
-// kycStoreFile reads an optional uploaded file from the given multipart
-// field and saves it to the configured store (local ./storage or S3) under
-// kyc/{subdir}/, returning that key (e.g. "kyc/nic_front/<hex>.jpg") to
-// store in the DB. Returns ("", nil) if the field was not present in the
-// request.
-func kycStoreFile(r *http.Request, store storage.Store, field, subdir string) (string, error) {
-	file, header, err := r.FormFile(field)
-	if err != nil {
-		if err == http.ErrMissingFile {
-			return "", nil
-		}
-		return "", err
-	}
-	defer file.Close()
-
-	// Sniff the real type from the content, not the client's claim, so the
-	// file is served back with a truthful Content-Type.
-	head := make([]byte, 512)
-	n, _ := io.ReadFull(file, head)
-	contentType := http.DetectContentType(head[:n])
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return "", err
-	}
-
-	key := "kyc/" + subdir + "/" + randomHex(16) + kycSafeExt(header.Filename)
-	if err := store.Put(r.Context(), key, file, header.Size, contentType); err != nil {
-		log.Printf("kyc: storing %s in %s failed: %v", key, store.Name(), err)
-		return "", err
-	}
-	return key, nil
-}
-
-// kycImageTypes are the formats Laravel's `image` rule accepts, minus SVG
-// (which can carry script and is excluded by default since Laravel 11).
-var kycImageTypes = map[string]bool{
-	"image/jpeg": true, "image/png": true, "image/gif": true, "image/bmp": true, "image/webp": true,
-}
-
-// kycValidateImages applies the `image` rule to every KYC file field that
-// was sent, judging by the file's content rather than its name.
-func kycValidateImages(r *http.Request, errs map[string][]string) {
-	for _, field := range []string{"nic_front", "nic_back", "passport_image"} {
-		file, _, err := r.FormFile(field)
-		if err != nil {
-			continue // absent: the required_if checks handle that
-		}
-		head := make([]byte, 512)
-		n, _ := io.ReadFull(file, head)
-		file.Close()
-		if !kycImageTypes[http.DetectContentType(head[:n])] {
-			errs[field] = []string{"The " + strings.ReplaceAll(field, "_", " ") + " field must be an image."}
-		}
-	}
-}
-
-// kycSafeExt keeps the client's extension (as the original did) only when
-// it is a short plain alphanumeric one, so a crafted filename can't shape
-// the stored key.
-func kycSafeExt(filename string) string {
-	ext := strings.ToLower(filepath.Ext(filename))
-	if len(ext) < 2 || len(ext) > 6 {
-		return ""
-	}
-	for _, c := range ext[1:] {
-		if (c < 'a' || c > 'z') && (c < '0' || c > '9') {
-			return ""
-		}
-	}
-	return ext
-}
-
-// kycServeFile serves /storage/kyc/* from the configured store, so S3
-// objects stay private and existing URLs saved in the DB keep working.
-func kycServeFile(store storage.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		key, err := storage.CleanKey("kyc/" + chi.URLParam(r, "*"))
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		body, info, err := store.Open(r.Context(), key)
-		if errors.Is(err, storage.ErrNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		if err != nil {
-			log.Printf("kyc: reading %s from %s failed: %v", key, store.Name(), err)
-			http.Error(w, "could not load file", http.StatusBadGateway)
-			return
-		}
-		defer body.Close()
-
-		if info.ContentType == "" {
-			info.ContentType = "application/octet-stream"
-		}
-		w.Header().Set("Content-Type", info.ContentType)
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Cache-Control", "private, max-age=3600")
-		if info.Size > 0 {
-			w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
-		}
-		if !info.ModTime.IsZero() {
-			w.Header().Set("Last-Modified", info.ModTime.UTC().Format(http.TimeFormat))
-		}
-		io.Copy(w, body)
-	}
-}
-
-func kycNullStr(s string) interface{} {
-	if s == "" {
-		return nil
-	}
-	return s
 }

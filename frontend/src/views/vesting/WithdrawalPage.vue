@@ -52,7 +52,7 @@ const availableAddresses = computed(() => addresses.value.filter(a => !a.revoked
 const selectedAddress = computed(() => availableAddresses.value.find(a => a.id === addressId.value))
 const accountWaiting = computed(() => security.value?.hold_until && remainingSeconds(security.value.hold_until, now.value) !== 0)
 const addressWaiting = computed(() => selectedAddress.value && remainingSeconds(selectedAddress.value.eligible_at, now.value) !== 0)
-const securityReady = computed(() => security.value?.email_verified && security.value?.authenticator_confirmed && !security.value?.withdrawals_frozen)
+const securityReady = computed(() => !(security.value?.kyc_required && !security.value?.kyc_verified) && security.value?.email_verified && security.value?.authenticator_confirmed && !security.value?.withdrawals_frozen)
 const admissionChecked = computed(() => security.value?.withdrawal_admission_checked === true)
 const cooldownWaiting = computed(() => security.value?.withdrawal_cooldown_until && remainingSeconds(security.value.withdrawal_cooldown_until, now.value) !== 0)
 const pendingQueue = computed(() => requests.value.some(r => ['pending', 'cancel_requested', 'cancellation_review_required'].includes(r.queue_status) || (r.queue_status === 'submitted' && !r.remote_withdrawal_id))
@@ -217,6 +217,7 @@ onBeforeUnmount(() => { stopped = true; window.clearInterval(statusTimer); clear
     <p v-if="security?.withdrawals_frozen" role="status" class="alert alert-warning">Withdrawals are frozen for this account. Contact support.</p>
     <p v-else-if="security && !securityReady" role="status" class="alert alert-warning">Complete email verification and authenticator setup in <RouterLink to="/wallet/security">Withdrawal security</RouterLink>.</p>
     <WithdrawalCountdown v-if="accountWaiting" :deadline="security.hold_until" :now="now" kind="account" compact />
+    <p v-if="security?.kyc_required && !security?.kyc_verified" class="alert alert-warning">Identity verification is required. <RouterLink to="/kyc/show">Verify through your Tier account</RouterLink>.</p>
     <WithdrawalCountdown v-if="security?.withdrawal_cooldown_until" :deadline="security.withdrawal_cooldown_until" :now="now" kind="cooldown" compact />
     <p v-if="enabled && security && !admissionChecked" role="status" class="alert alert-warning">Current withdrawal status and cooldown could not be confirmed. Check status before requesting a withdrawal.</p>
     <button class="btn btn-outline-secondary mb-3" :disabled="busy" @click="refresh">Check status</button>

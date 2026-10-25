@@ -60,6 +60,7 @@ onMounted(async () => {
       <button v-if="callbackProof && error" class="btn btn-outline-info" :disabled="busy" @click="begin">Start a new connection</button>
       <p v-if="callbackProof && error" class="text-muted mt-2">You can retry a temporary failure. If the request expired or you changed login sessions, start a new connection.</p>
     </template>
+    <RouterLink v-if="linked" to="/kyc/show" class="btn btn-outline-info">View identity verification</RouterLink>
     <RouterLink to="/wallet/vesting" class="btn btn-link">Back to vesting</RouterLink>
     </section>
   </DashboardLayout>

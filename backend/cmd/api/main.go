@@ -112,6 +112,7 @@ func main() {
 
 	if cfg.EnableScheduler {
 		if cfg.BlockchainEnabled {
+			handlers.StartTierKycSync(deps)
 			jobs.StartDepositNotifications(conn, deps.Blockchain, securitymail.New(cfg))
 			handlers.StartAutomaticPurchases(deps)
 			handlers.StartRegistrationReopening(deps)
