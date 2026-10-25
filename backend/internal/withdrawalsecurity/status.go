@@ -7,6 +7,8 @@ import (
 )
 
 type Status struct {
+	KycRequired            bool       `json:"kyc_required"`
+	KycVerified            bool       `json:"kyc_verified"`
 	AdmissionChecked       bool       `json:"withdrawal_admission_checked"`
 	ActiveWithdrawalID     *string    `json:"active_withdrawal_id"`
 	CooldownMinutes        int        `json:"withdrawal_cooldown_minutes"`

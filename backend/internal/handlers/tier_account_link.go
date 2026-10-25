@@ -152,6 +152,10 @@ func RegisterTierAccountLinkRoutes(r chi.Router, d *app.Deps) {
 				httpx.Error(w, 503, "Link result uncertain; check account-link status")
 				return
 			}
+			// Verification sync is independent of vesting and cannot undo an established link.
+			if _, err := syncTierIdentity(r.Context(), d, userID); err != nil {
+				log.Printf("Tier linked; identity status will retry: user_id=%d", userID)
+			}
 			httpx.JSON(w, 200, map[string]interface{}{"linked": true, "tier_user_id": linkedID})
 		})
 	})

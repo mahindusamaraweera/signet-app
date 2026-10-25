@@ -51,6 +51,10 @@ func withdrawalRequestHandler(d *app.Deps, action string) http.HandlerFunc {
 				httpx.JSON(w, 503, map[string]string{"code": "withdrawal_admission_unavailable", "message": "Withdrawal status or cooldown could not be confirmed. Check status before trying again."})
 				return
 			}
+			if admission.KycRequired != nil && *admission.KycRequired && (admission.KycVerified == nil || !*admission.KycVerified) {
+				httpx.JSON(w, 409, map[string]string{"code": "kyc_required", "message": "Connect your Tier account and complete identity verification before withdrawing."})
+				return
+			}
 			if !*admission.CanRequest {
 				result := map[string]string{"code": "withdrawal_already_processing", "message": "An existing withdrawal is processing or needs review. Wait for completion or confirmed cancellation before starting another."}
 				if admission.ActiveWithdrawalID != nil {
