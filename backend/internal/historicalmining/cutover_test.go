@@ -12,6 +12,7 @@ import (
 	"errors"
 	"github.com/jmoiron/sqlx"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -265,5 +266,104 @@ func TestPackageActivationUsesUTCWithoutChangingReviewedEvidence(t *testing.T) {
 	}
 	if p.Activated != "2026-07-04 01:55:25" {
 		t.Fatal("reviewed proof timestamp changed")
+	}
+}
+
+func octoberReads(p Profile, m Mining, audit *Snapshot) []step {
+	s := reads(p, m, audit)
+	if p.MiningID == 0 {
+		s[2].vals = nil
+	}
+	if audit != nil {
+		s[3].vals[2] = OctoberElevenBatch
+	}
+	return s
+}
+
+func TestOctoberElevenApplyAndExportPreserveAbsenceAndFundingScope(t *testing.T) {
+	at := time.Date(2026, 10, 29, 0, 0, 0, 0, time.UTC)
+	profiles := OctoberElevenProfiles()
+	if len(profiles) != 11 {
+		t.Fatal("scope changed")
+	}
+	f := &fixture{}
+	snapshots := []Snapshot{}
+	total := uint64(0)
+	for _, p := range profiles {
+		m := original(p)
+		if p.MiningID == 0 {
+			m = absentMining(p)
+		}
+		f.steps = append(f.steps, octoberReads(p, m, nil)...)
+		snapshots = append(snapshots, snapshot(p, m, at))
+		amount, err := strconv.ParseUint(p.Amount, 10, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		total += amount
+	}
+	if total != 5800000 || profiles[6].UserID != 449 || profiles[9].Email != "bhmadubashi81@gmail.com" {
+		t.Fatal("reviewed correction changed")
+	}
+	for _, p := range profiles {
+		p := p
+		f.steps = append(f.steps, step{match: "INSERT INTO historical_mining_cutovers", affected: 1, check: func(a []driver.NamedValue) error {
+			if p.MiningID == 0 && a[1].Value != nil {
+				return errors.New("invented mining ID")
+			}
+			return nil
+		}})
+		if p.MiningID != 0 {
+			f.steps = append(f.steps, step{match: "UPDATE user_minings", affected: 1})
+		}
+	}
+	db := dbFor(f)
+	out, err := RunBatch(context.Background(), db, true, false, at, OctoberElevenBatch)
+	db.Close()
+	if err != nil || !f.committed || len(f.steps) != 0 {
+		t.Fatalf("apply: %v", err)
+	}
+	if _, err = ProofBatch(out, strings.Repeat("k", 32), at, OctoberElevenBatch); err != nil {
+		t.Fatal(err)
+	}
+	// An already frozen no-mining account stays row-free on export and reruns.
+	f = &fixture{}
+	for i, p := range profiles {
+		m := original(p)
+		if p.MiningID == 0 {
+			m = absentMining(p)
+		} else {
+			m.Total = p.Amount
+			m.Accrued = "0.00000000"
+			m.Daily = "0"
+			m.Status = "inactive"
+			m.WebhookStatus = "historical_frozen"
+			m.NextRetry = ""
+		}
+		f.steps = append(f.steps, octoberReads(p, m, &snapshots[i])...)
+	}
+	db = dbFor(f)
+	defer db.Close()
+	if _, err = RunBatch(context.Background(), db, false, true, at, OctoberElevenBatch); err != nil || f.committed || len(f.steps) != 0 {
+		t.Fatalf("export: %v", err)
+	}
+}
+
+func TestOctoberElevenUnexpectedMiningRowAbortsBeforeAnyWrites(t *testing.T) {
+	f := &fixture{}
+	for _, p := range OctoberElevenProfiles() {
+		steps := octoberReads(p, original(p), nil)
+		if p.MiningID == 0 {
+			steps[2].vals = []driver.Value{int64(999), int64(p.UserID), "1", "0", "1", "active", "pending", "", "0", "", "", ""}
+			f.steps = append(f.steps, steps[:3]...)
+			break
+		}
+		f.steps = append(f.steps, steps...)
+	}
+	db := dbFor(f)
+	defer db.Close()
+	_, err := RunBatch(context.Background(), db, true, false, time.Now(), OctoberElevenBatch)
+	if err == nil || f.committed || !f.rolled || len(f.steps) != 0 {
+		t.Fatalf("unexpected mining accepted: %v", err)
 	}
 }
