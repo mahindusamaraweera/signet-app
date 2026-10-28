@@ -13,7 +13,7 @@ import (
 )
 
 func run() error {
-	batch := flag.String("batch", historicalmining.Batch, "reviewed fixed batch: historical-mining-435-439-448-v1 or historical-option-one-nine-v1")
+	batch := flag.String("batch", historicalmining.Batch, "reviewed fixed batch: historical-mining-435-439-448-v1 or historical-option-one-nine-v1 or historical-october-eleven-v1")
 	apply := flag.Bool("execute", false, "archive and stop only the selected reviewed batch; no transfers")
 	paused := flag.Bool("services-paused", false, "operator stopped ALL source API/scheduler instances and drained in-flight webhooks")
 	export := flag.Bool("export-proof", false, "verify frozen records and export a fresh signed proof, without rewriting mining")
