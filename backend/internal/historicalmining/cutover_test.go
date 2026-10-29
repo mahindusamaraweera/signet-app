@@ -367,3 +367,22 @@ func TestOctoberElevenUnexpectedMiningRowAbortsBeforeAnyWrites(t *testing.T) {
 		t.Fatalf("unexpected mining accepted: %v", err)
 	}
 }
+
+func TestOctober444UsesVerifiedDatabaseEmail(t *testing.T) {
+	p := OctoberElevenProfiles()[4]
+	if p.UserID != 444 || p.Email != "chamindananayakkaraforkalignme@gmail.com" {
+		t.Fatal("verified email changed")
+	}
+	f := &fixture{steps: reads(p, absentMining(p), nil)[:2]}
+	f.steps[0].vals[0] = "chamindananayakkaraforkaliganme@gmail.com"
+	db := dbFor(f)
+	defer db.Close()
+	tx, err := db.BeginTxx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := loadOwner(context.Background(), tx, p); err == nil {
+		t.Fatal("CSV typo accepted instead of verified identity")
+	}
+}
