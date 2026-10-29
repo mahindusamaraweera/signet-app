@@ -3,7 +3,7 @@
 Batch `historical-october-eleven-v1` covers source IDs
 436,441,442,443,444,446,449,450,455,456,457 and 5,800,000 SIGNET.
 The operator corrected CSV ID 499 to 449 (buddikaanura04@gmail.com), and confirmed
-456 as bhmadubashi81@gmail.com. Actual package prices are 500/1,000/2,500 USDT,
+456 as hbmadubashi81@gmail.com. Actual package prices are 500/1,000/2,500 USDT,
 not CSV gross figures 580/1,330/2,780. Token entitlements remain the CSV amounts.
 The listed scope includes source package activations after October 10; the CSV
 filename is not a date filter. No already-funded prior batch users are included.

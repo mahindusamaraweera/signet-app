@@ -302,7 +302,7 @@ func TestOctoberElevenApplyAndExportPreserveAbsenceAndFundingScope(t *testing.T)
 		}
 		total += amount
 	}
-	if total != 5800000 || profiles[6].UserID != 449 || profiles[9].Email != "bhmadubashi81@gmail.com" {
+	if total != 5800000 || profiles[6].UserID != 449 || profiles[9].Email != "hbmadubashi81@gmail.com" {
 		t.Fatal("reviewed correction changed")
 	}
 	for _, p := range profiles {
@@ -384,5 +384,24 @@ func TestOctober444UsesVerifiedDatabaseEmail(t *testing.T) {
 	defer tx.Rollback()
 	if err := loadOwner(context.Background(), tx, p); err == nil {
 		t.Fatal("CSV typo accepted instead of verified identity")
+	}
+}
+
+func TestOctober456RejectsPreviouslyConfirmedEmailTypo(t *testing.T) {
+	p := OctoberElevenProfiles()[9]
+	if p.UserID != 456 || p.Email != "hbmadubashi81@gmail.com" {
+		t.Fatal("verified recipient changed")
+	}
+	f := &fixture{steps: reads(p, original(p), nil)[:2]}
+	f.steps[0].vals[0] = "bhmadubashi81@gmail.com"
+	db := dbFor(f)
+	defer db.Close()
+	tx, err := db.BeginTxx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := loadOwner(context.Background(), tx, p); err == nil {
+		t.Fatal("old recipient typo accepted")
 	}
 }
