@@ -155,11 +155,27 @@ func bootstrapGlobalShareWallet(tx *sqlx.Tx, userID uint64) error {
 	return err
 }
 
+// GlobalShareEligible reports whether userID may receive Global Share Wallet
+// credits. Owner policy: only users enabled for the Global Director Share
+// (global_director_share_status = 1); a missing user is not eligible.
+func GlobalShareEligible(tx *sqlx.Tx, userID uint64) (bool, error) {
+	var status bool
+	err := tx.Get(&status, "SELECT global_director_share_status FROM users WHERE id = ?", userID)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return status, err
+}
+
 // creditGlobalShareWallet applies the shared "credit up to max_out, log the
 // full requested amount" pattern used by every wallet-crediting path in the
 // original app. Logs the full walletAmount even when the actual credit was
 // capped — that mismatch is preserved verbatim (see financial_engine.md §1).
+// Users without global_director_share_status = 1 are skipped entirely.
 func creditGlobalShareWallet(tx *sqlx.Tx, userID uint64, walletAmount float64) error {
+	if eligible, err := GlobalShareEligible(tx, userID); err != nil || !eligible {
+		return err
+	}
 	if err := bootstrapGlobalShareWallet(tx, userID); err != nil {
 		return err
 	}
