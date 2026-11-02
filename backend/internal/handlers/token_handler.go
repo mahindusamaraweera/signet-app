@@ -515,12 +515,18 @@ func creditWalletTx(tx *sqlx.Tx, userID uint64, amount float64, description stri
 		}
 	}
 
-	// Global Share Wallet credit — same bootstrap+cap logic as wallet.go.
-	var exists int
-	if err := tx.Get(&exists, "SELECT COUNT(*) FROM global_share_wallets WHERE user_id = ?", userID); err != nil {
+	// Global Share Wallet credit — same eligibility+bootstrap+cap logic as wallet.go.
+	eligible, err := wallet.GlobalShareEligible(tx, userID)
+	if err != nil {
 		return err
 	}
-	if exists == 0 {
+	var exists int
+	if eligible {
+		if err := tx.Get(&exists, "SELECT COUNT(*) FROM global_share_wallets WHERE user_id = ?", userID); err != nil {
+			return err
+		}
+	}
+	if eligible && exists == 0 {
 		var prices []int64
 		if err := tx.Select(&prices, `SELECT p.price FROM user_packages up JOIN packages p ON p.id = CAST(up.package AS UNSIGNED) WHERE up.user_id = ?`, userID); err != nil {
 			return err
@@ -544,7 +550,10 @@ func creditWalletTx(tx *sqlx.Tx, userID uint64, amount float64, description stri
 		Balance float64 `db:"balance"`
 		MaxOut  float64 `db:"max_out"`
 	}
-	err = tx.Get(&gsw, "SELECT id, balance, max_out FROM global_share_wallets WHERE user_id = ?", userID)
+	err = sql.ErrNoRows
+	if eligible {
+		err = tx.Get(&gsw, "SELECT id, balance, max_out FROM global_share_wallets WHERE user_id = ?", userID)
+	}
 	if err == nil {
 		remaining := gsw.MaxOut - gsw.Balance
 		if remaining > 0 {

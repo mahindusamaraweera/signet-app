@@ -602,6 +602,10 @@ func bootstrapNewUserGlobalShareWallet(d *app.Deps, userID uint64) error {
 	if err := d.DB.Get(&exists, "SELECT COUNT(*) FROM global_share_wallets WHERE user_id = ?", userID); err != nil || exists > 0 {
 		return err
 	}
+	var eligible bool
+	if err := d.DB.Get(&eligible, "SELECT global_director_share_status FROM users WHERE id = ?", userID); err != nil || !eligible {
+		return err
+	}
 	var highest models.NullInt64
 	_ = d.DB.Get(&highest, `
 		SELECT MAX(p.price) FROM user_packages up JOIN packages p ON p.id = CAST(up.package AS UNSIGNED)
