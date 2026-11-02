@@ -123,6 +123,7 @@ func TestCommissionRecordUsesCreditTransactionAndExactEarnLog(t *testing.T) {
 				fixture.steps[3].err = errors.New("outbox unavailable")
 			} else {
 				fixture.steps = append(fixture.steps,
+					commissionSQLStep{contains: "SELECT global_director_share_status", columns: []string{"global_director_share_status"}, values: []driver.Value{int64(1)}},
 					commissionSQLStep{contains: "COUNT(*) FROM global_share_wallets", columns: []string{"count"}, values: []driver.Value{int64(1)}},
 					commissionSQLStep{contains: "SELECT id, balance, max_out", columns: []string{"id", "balance", "max_out"}, values: []driver.Value{int64(8), float64(0), float64(1000)}},
 					commissionSQLStep{contains: "UPDATE global_share_wallets"},
@@ -165,12 +166,37 @@ func TestCommissionRecordUsesCreditTransactionAndExactEarnLog(t *testing.T) {
 	}
 }
 
+func TestGlobalShareWalletSkipsUsersWithoutDirectorShareStatus(t *testing.T) {
+	fixture := &commissionSQLFixture{steps: []commissionSQLStep{
+		{contains: "SELECT id FROM wallets", columns: []string{"id"}, values: []driver.Value{int64(9)}},
+		{contains: "UPDATE wallets"},
+		{contains: "INSERT INTO earn_logs", insertID: 17},
+		{contains: "SELECT global_director_share_status", columns: []string{"global_director_share_status"}, values: []driver.Value{int64(0)}},
+		{contains: "SELECT up.id", columns: []string{"id", "earn", "price"}, values: []driver.Value{int64(4), "0", int64(100)}},
+		{contains: "UPDATE user_packages SET earn"},
+	}}
+	db := sqlx.NewDb(sql.OpenDB(fixture), "commission-fixture")
+	defer db.Close()
+	tx, err := db.Beginx()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := creditWalletTx(tx, 3, 50, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.steps) != 0 {
+		t.Fatal("required SQL was not executed")
+	}
+}
+
 func TestCompanyOverflowCommissionGetsItsOwnEarnLogEvidence(t *testing.T) {
 	fixture := &commissionSQLFixture{steps: []commissionSQLStep{
 		{contains: "SELECT id FROM wallets", columns: []string{"id"}, values: []driver.Value{int64(9)}},
 		{contains: "UPDATE wallets"},
 		{contains: "INSERT INTO earn_logs", insertID: 17},
 		{contains: "INSERT INTO blockchain_commission_outbox", args: []driver.Value{int64(5), int64(17), int64(42), "50", "", "direct_team"}},
+		{contains: "SELECT global_director_share_status", columns: []string{"global_director_share_status"}, values: []driver.Value{int64(1)}},
 		{contains: "COUNT(*) FROM global_share_wallets", columns: []string{"count"}, values: []driver.Value{int64(1)}},
 		{contains: "SELECT id, balance, max_out", columns: []string{"id", "balance", "max_out"}, values: []driver.Value{int64(8), float64(1000), float64(1000)}},
 		{contains: "SELECT up.id", columns: []string{"id", "earn", "price"}, values: []driver.Value{int64(4), "401", int64(100)}},
