@@ -66,7 +66,7 @@ func RunDepositNotifications(db *sqlx.DB, gateway *blockchain.Gateway, sender De
 		raw, err := gateway.Deposits(ctx, user.ID, user.Before)
 		cancel()
 		if err != nil {
-			failures = append(failures, errors.New("deposit notification source unavailable"))
+			failures = append(failures, fmt.Errorf("deposit notification source unavailable: user_id=%d before_id=%d %s", user.ID, user.Before, blockchain.DepositFailureDiagnostic(err)))
 			continue
 		}
 		var page struct {
@@ -74,7 +74,7 @@ func RunDepositNotifications(db *sqlx.DB, gateway *blockchain.Gateway, sender De
 			Next     *uint64                `json:"next_before_id"`
 		}
 		if err = json.Unmarshal(raw, &page); err != nil {
-			failures = append(failures, err)
+			failures = append(failures, fmt.Errorf("deposit notification invalid response: user_id=%d before_id=%d reason=invalid_deposit_page", user.ID, user.Before))
 			continue
 		}
 		good := true

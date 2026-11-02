@@ -55,7 +55,7 @@ func completePasswordReset(ctx context.Context, db *sql.DB, email, token, passwo
 	if err := tx.QueryRowContext(ctx, `SELECT security_version,hold_until FROM withdrawal_security_profiles WHERE user_id=? FOR UPDATE`, userID).Scan(&version, &hold); err != nil {
 		return err
 	}
-	until := now.UTC().Add(48 * time.Hour)
+	until := now.UTC().Add(24 * time.Hour)
 	if hold.Valid && hold.Time.After(until) {
 		until = hold.Time
 	}

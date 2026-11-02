@@ -11,7 +11,7 @@ import (
 )
 
 func TestQueuedAssertionRequiresCurrentSecurityConsumedApprovalAndExactOutbox(t *testing.T) {
-	for _, scenario := range []string{"success", "changed security", "unconsumed", "changed outbox", "already submitted", "changed password", "legacy unbound queue"} {
+	for _, scenario := range []string{"uuid success", "uuid missing", "success", "changed security", "unconsumed", "changed outbox", "already submitted", "changed password", "legacy unbound queue"} {
 		t.Run(scenario, func(t *testing.T) {
 			key := []byte(strings.Repeat("k", 32))
 			now := time.Unix(1800000000, 0).UTC()
@@ -59,16 +59,29 @@ func TestQueuedAssertionRequiresCurrentSecurityConsumedApprovalAndExactOutbox(t 
 					fixture.steps = append(fixture.steps, sqlStep{match: "FROM withdrawal_submission_outbox", values: []driver.Value{int64(42), int64(2), string(encoded), digest, queueStatus, revision}})
 				}
 			}
+			if scenario == "uuid success" || scenario == "uuid missing" {
+				value := "01a13b42-28d0-7000-8000-0000000001cd"
+				if scenario == "uuid missing" {
+					value = ""
+				}
+				fixture.steps = append(fixture.steps, sqlStep{match: "SELECT uuid FROM users", values: []driver.Value{value}})
+			}
 			db := sql.OpenDB(fixture)
 			defer db.Close()
 			s, err := NewService(db, key)
 			if err != nil {
 				t.Fatal(err)
 			}
+			if scenario == "uuid success" || scenario == "uuid missing" {
+				s.RequireUUIDIdentity()
+			}
 			assertion, signature, err := s.BuildQueuedWithdrawalAssertion(context.Background(), a.ID, terms, []byte(strings.Repeat("z", 32)), now)
-			success := scenario == "success"
+			success := scenario == "success" || scenario == "uuid success"
 			if (err == nil) != success || fixture.committed != success || len(fixture.steps) != 0 {
 				t.Fatalf("wrong signing boundary: %v", err)
+			}
+			if scenario == "uuid success" && assertion.ExternalUserID != "01a13b42-28d0-7000-8000-0000000001cd" {
+				t.Fatal("UUID mode signed a numeric owner")
 			}
 			if success && (assertion.AuthorizationID != a.ID || len(signature) != 64) {
 				t.Fatal("missing signed approval")

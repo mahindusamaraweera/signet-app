@@ -6,6 +6,10 @@ import (
 	"database/sql/driver"
 	"errors"
 	"github.com/jmoiron/sqlx"
+	"net/http"
+	"net/http/httptest"
+	"signet-backend/internal/blockchain"
+	"strings"
 	"testing"
 )
 
@@ -106,5 +110,34 @@ func TestDepositMailRequiresSettledUSDT(t *testing.T) {
 	candidate.Hash = "javascript:alert(1)"
 	if depositMailEligible(candidate) {
 		t.Fatal("malformed hash")
+	}
+}
+
+func TestDepositSourceFailureIdentifiesUserAndCursorWithoutBodyLeak(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/integration/deposits" {
+			t.Error("wrong endpoint")
+		}
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"secret-token must not appear in logs"}`))
+	}))
+	defer server.Close()
+	gateway, err := blockchain.New(server.URL, "test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &expiryFixture{steps: []expiryStep{
+		{query: "SELECT u.id", columns: []string{"id", "before_id"}, values: []driver.Value{int64(42), int64(123)}},
+		{query: "SELECT n.remote_deposit_id", columns: []string{"remote_deposit_id", "email", "amount", "tx_hash"}},
+	}, execs: []string{"INSERT INTO deposit_notification_scans"}}
+	conn := sql.OpenDB(f)
+	defer conn.Close()
+	sender := &depositTestSender{}
+	err = RunDepositNotifications(sqlx.NewDb(conn, "fixture"), gateway, sender)
+	if err == nil || !strings.Contains(err.Error(), "user_id=42 before_id=123 stage=token_deposits http=404") || strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("unsafe or incomplete diagnostics: %v", err)
+	}
+	if sender.calls != 0 || len(f.execs) != 0 || len(f.steps) != 0 {
+		t.Fatal("failed fetch sent mail or changed cursor")
 	}
 }

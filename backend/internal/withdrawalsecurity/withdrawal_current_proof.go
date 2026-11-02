@@ -50,6 +50,9 @@ func (s *Service) BuildWithdrawalCurrentProof(ctx context.Context, id string, ex
 	if !approvedRemote.Valid || approvedRemote.Int64 <= 0 || uint64(approvedRemote.Int64) != remoteID {
 		return WithdrawalRevalidation{}, ErrWithdrawalAuthorization
 	}
+	if err := s.bindAuthorizationUUID(ctx, tx, &a); err != nil {
+		return WithdrawalRevalidation{}, err
+	}
 	proof, err := signWithdrawalRevalidation(a, remoteID, nonce, signingKey, now)
 	if err != nil {
 		return WithdrawalRevalidation{}, err

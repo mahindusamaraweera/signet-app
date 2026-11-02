@@ -117,6 +117,15 @@ func miningUpdateHandler(d *app.Deps) http.HandlerFunc {
 			httpx.OK(w, map[string]interface{}{"success": false, "message": "User not found"})
 			return
 		}
+		var cutover int
+		if err := d.DB.Get(&cutover, "SELECT COUNT(*) FROM historical_mining_cutovers WHERE user_id=?", id); err != nil {
+			httpx.Error(w, 503, "Historical mining status unavailable")
+			return
+		}
+		if cutover > 0 {
+			httpx.Error(w, 409, "This historical allocation is managed by blockchain vesting. Legacy mining cannot be restarted.")
+			return
+		}
 		var userCount int
 		if d.Cfg.BlockchainEnabled {
 			var integrated int
@@ -162,7 +171,7 @@ func miningUpdateHandler(d *app.Deps) http.HandlerFunc {
 		}
 
 		if found {
-			_, err = d.DB.Exec("UPDATE user_minings SET daily_mining = ?, total_token = ?, status = ?, updated_at = NOW() WHERE id = ?",
+			_, err = d.DB.Exec("UPDATE user_minings SET daily_mining = ?, total_token = ?, status = ?, updated_at = NOW() WHERE id = ? AND NOT EXISTS (SELECT 1 FROM historical_mining_cutovers c WHERE c.user_id=user_minings.user_id)",
 				mining.DailyMining, mining.TotalToken, mining.Status, mining.ID)
 		} else {
 			_, err = d.DB.Exec(`INSERT INTO user_minings (user_id, daily_mining, total_token, status, mining_token, created_at, updated_at)

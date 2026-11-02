@@ -52,6 +52,7 @@ func RunMiningWebhook(db *sqlx.DB, cfg *config.Config) error {
 		WHERE webhook_sent_at IS NULL
 		  AND (webhook_status = 'pending' OR (webhook_status = 'failed' AND (next_retry_at IS NULL OR next_retry_at <= NOW())))
 		  AND webhook_attempts < 5
+          AND NOT EXISTS (SELECT 1 FROM historical_mining_cutovers c WHERE c.user_id=user_minings.user_id)
 		ORDER BY id LIMIT 50`); err != nil {
 		return err
 	}
@@ -59,6 +60,13 @@ func RunMiningWebhook(db *sqlx.DB, cfg *config.Config) error {
 	client := &http.Client{Timeout: 20 * time.Second}
 
 	for _, rec := range records {
+		var frozen int
+		if err := db.Get(&frozen, "SELECT COUNT(*) FROM historical_mining_cutovers WHERE user_id=?", rec.UserID); err != nil {
+			return err
+		}
+		if frozen > 0 {
+			continue
+		}
 		// optional($record->secretKey)->secret_key: a user without a key is
 		// still sent, with user_id null.
 		var secretKey sql.NullString
@@ -101,7 +109,7 @@ func RunMiningWebhook(db *sqlx.DB, cfg *config.Config) error {
 		resp.Body.Close()
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			if _, err := db.Exec(`UPDATE user_minings SET webhook_sent_at = NOW(), webhook_status = 'sent', webhook_response = ?, next_retry_at = NULL, updated_at = NOW() WHERE id = ?`,
+			if _, err := db.Exec(`UPDATE user_minings SET webhook_sent_at = NOW(), webhook_status = 'sent', webhook_response = ?, next_retry_at = NULL, updated_at = NOW() WHERE id = ? AND webhook_status <> 'historical_frozen'`,
 				string(respBody), rec.ID); err != nil {
 				log.Printf("jobs: mining:send-webhook: could not mark record %d sent: %v", rec.ID, err)
 			}
@@ -138,7 +146,7 @@ func miningWebhookRecordFailure(db *sqlx.DB, id uint64, priorAttempts int, respo
 	} else {
 		nextRetryAt = time.Now().Add(miningWebhookBackoff(attempts))
 	}
-	if _, err := db.Exec(`UPDATE user_minings SET webhook_status = ?, webhook_attempts = ?, next_retry_at = ?, webhook_response = ?, updated_at = NOW() WHERE id = ?`,
+	if _, err := db.Exec(`UPDATE user_minings SET webhook_status = ?, webhook_attempts = ?, next_retry_at = ?, webhook_response = ?, updated_at = NOW() WHERE id = ? AND webhook_status <> 'historical_frozen'`,
 		status, attempts, nextRetryAt, response, id); err != nil {
 		log.Printf("jobs: mining:send-webhook: could not record failure for record %d: %v", id, err)
 	}

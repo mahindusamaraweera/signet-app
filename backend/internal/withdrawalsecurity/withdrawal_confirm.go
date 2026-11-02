@@ -12,6 +12,13 @@ import (
 
 // ConfirmWithdrawal grants short-lived source approval only, not a payout.
 // Submission must consume it atomically and retain token's financial audit.
+var ErrWithdrawalExpired = errors.New("withdrawal request expired")
+var ErrWithdrawalEmailExpired = errors.New("withdrawal email code expired")
+var ErrWithdrawalEmailIncorrect = errors.New("withdrawal email code incorrect")
+var ErrWithdrawalEmailSuperseded = errors.New("withdrawal email code replaced")
+var ErrWithdrawalEmailAttempts = errors.New("withdrawal email attempts exhausted")
+var ErrWithdrawalEmailUsed = errors.New("withdrawal email already used")
+
 func (s *Service) ConfirmWithdrawal(ctx context.Context, userID uint64, password, id, proof string, expected WithdrawalTerms, challengeID, emailCode, authenticatorCode string, now time.Time) error {
 	if userID == 0 || expected.UserID != userID || !challengeIDPattern.MatchString(id) || !challengeIDPattern.MatchString(proof) || !challengeIDPattern.MatchString(challengeID) {
 		return ErrWithdrawalAuthorization
@@ -29,8 +36,11 @@ func (s *Service) ConfirmWithdrawal(ctx context.Context, userID uint64, password
 	if err != nil {
 		return err
 	}
-	if a.Terms != expected || a.Status != "pending" || !now.Before(a.ExpiresAt) || !hmac.Equal([]byte(a.ProofHash), []byte(a.hash(s.key, proof))) {
+	if a.Terms != expected || a.Status != "pending" || !hmac.Equal([]byte(a.ProofHash), []byte(a.hash(s.key, proof))) {
 		return ErrWithdrawalAuthorization
+	}
+	if !now.Before(a.ExpiresAt) {
+		return ErrWithdrawalExpired
 	}
 	var c Challenge
 	var consumed sql.NullTime
@@ -40,7 +50,23 @@ func (s *Service) ConfirmWithdrawal(ctx context.Context, userID uint64, password
 	if consumed.Valid {
 		c.ConsumedAt = &consumed.Time
 	}
-	if c.Status != "delivered" || c.ConsumedAt != nil || c.Attempts >= 5 {
+	target, targetErr := withdrawalChallengeTarget(a)
+	if targetErr != nil || c.Purpose != WithdrawalPurpose || c.Target != target || c.SecurityVersion != a.Terms.SecurityVersion || c.Email != email {
+		return ErrWithdrawalAuthorization
+	}
+	if c.Status == "superseded" {
+		return ErrWithdrawalEmailSuperseded
+	}
+	if c.ConsumedAt != nil || c.Status == "consumed" {
+		return ErrWithdrawalEmailUsed
+	}
+	if c.Attempts >= 5 {
+		return ErrWithdrawalEmailAttempts
+	}
+	if !now.Before(c.ExpiresAt) {
+		return ErrWithdrawalEmailExpired
+	}
+	if c.Status != "delivered" {
 		return ErrInvalidChallenge
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE withdrawal_security_challenges SET attempts=attempts+1 WHERE id=? AND user_id=?`, c.ID, userID); err != nil {
@@ -50,7 +76,7 @@ func (s *Service) ConfirmWithdrawal(ctx context.Context, userID uint64, password
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		return ErrInvalidChallenge
+		return ErrWithdrawalEmailIncorrect
 	}
 	if err := totp.ConsumeWithdrawalCode(ctx, tx, userID, secret, authenticatorCode, now); err != nil {
 		if errors.Is(err, totp.ErrInvalidOrReusedCode) {

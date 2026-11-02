@@ -2,24 +2,26 @@ package blockchain
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"math/big"
 	"regexp"
 )
 
 type PurchaseIntent struct {
-	Status            string `db:"status" json:"-"`
-	BonusPercent      int64  `db:"bonus_percent"`
-	Fee               string `db:"service_fee_usdt"`
-	Required          string `db:"required_usdt"`
-	Kind              string `db:"purchase_kind" json:"purchase_kind"`
-	PackageID         uint64 `db:"package_id" json:"package_id"`
-	ID                uint64 `db:"id" json:"id"`
-	UserID            uint64 `db:"user_id" json:"user_id"`
-	UserPackageID     uint64 `db:"user_package_id" json:"user_package_id"`
-	Price             string `db:"package_price" json:"package_price"`
-	CommissionUserID  uint64 `db:"commission_user_id" json:"-"`
-	CommissionPercent int64  `db:"commission_percent" json:"-"`
+	PackageSnapshotID sql.NullInt64 `db:"package_snapshot_id" json:"-"`
+	Status            string        `db:"status" json:"-"`
+	BonusPercent      int64         `db:"bonus_percent"`
+	Fee               string        `db:"service_fee_usdt"`
+	Required          string        `db:"required_usdt"`
+	Kind              string        `db:"purchase_kind" json:"purchase_kind"`
+	PackageID         uint64        `db:"package_id" json:"package_id"`
+	ID                uint64        `db:"id" json:"id"`
+	UserID            uint64        `db:"user_id" json:"user_id"`
+	UserPackageID     uint64        `db:"user_package_id" json:"user_package_id"`
+	Price             string        `db:"package_price" json:"package_price"`
+	CommissionUserID  uint64        `db:"commission_user_id" json:"-"`
+	CommissionPercent int64         `db:"commission_percent" json:"-"`
 }
 
 type PurchaseResult struct {

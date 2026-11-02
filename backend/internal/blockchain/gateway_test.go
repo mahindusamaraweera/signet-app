@@ -81,3 +81,23 @@ func TestExpiryRequiresExplicitEligibility(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvironmentIsSentOnCustodyRequests(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Signet-App-Environment") != "production" {
+			t.Error("missing environment boundary")
+		}
+		w.Write([]byte(`{"address":"0x1234567890123456789012345678901234567890","chain_id":56,"asset":"USDT","available":"0","provisioning_status":"ready"}`))
+	}))
+	defer server.Close()
+	gateway, err := New(server.URL, "test", "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gateway.EnsureWallet(context.Background(), 461); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(server.URL, "test", "production\r\nX-Injected: value"); err == nil {
+		t.Fatal("invalid environment accepted")
+	}
+}

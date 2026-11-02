@@ -20,6 +20,8 @@ async function copyAddress() {
 }
 function statusLabel(value) { return String(value || 'Pending').replaceAll('_', ' ') }
 const deposits = ref([])
+const historyLoaded = ref(false)
+const withdrawalsLoaded = ref(false)
 const nextCursor = ref(null)
 const error = ref('')
 const historyError = ref('')
@@ -42,6 +44,7 @@ async function history(older = false) {
   try {
     const { data } = await api.get('/blockchain/deposits', { params: older ? { before_id: nextCursor.value } : {} })
     if (stopped) return
+    historyLoaded.value = true
     deposits.value = older ? [...deposits.value, ...(data.deposits || [])] : data.deposits || []
     nextCursor.value = data.next_before_id
     historyError.value = ''
@@ -55,6 +58,7 @@ async function withdrawalHistory(older = false) {
   try {
     const { data } = await api.get('/blockchain/withdrawals', { params: older ? { before_id: withdrawalCursor.value } : {} })
     if (stopped) return
+    withdrawalsLoaded.value = true
     withdrawals.value = older ? [...withdrawals.value, ...(data.withdrawals || [])] : data.withdrawals || []
     withdrawalCursor.value = data.next_before_id
     withdrawalError.value = ''
@@ -138,9 +142,10 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
     </section>
     </div>
     <section class="card wallet-panel activity-panel">
-    <div class="panel-heading"><h2>Deposit history</h2><span class="small text-muted">{{ deposits.length }} loaded</span></div>
+    <div class="panel-heading"><h2>Deposit history</h2><span class="small text-muted">{{ historyLoaded ? `${deposits.length} loaded` : 'Not loaded' }}</span></div>
     <p v-if="historyError" class="alert alert-warning" role="alert">{{ historyError }}</p>
-    <p v-if="!historyBusy && !historyError && !deposits.length" class="wallet-empty">No deposits yet. Your confirmed transactions will appear here.</p>
+    <p v-if="historyLoaded && !historyBusy && !historyError && !deposits.length" class="wallet-empty">No deposits yet. Your confirmed transactions will appear here.</p>
+    <p v-if="!historyLoaded && !historyBusy" class="wallet-empty" role="status">Deposit history has not loaded. This does not indicate a zero balance.</p>
     <section v-for="deposit in deposits" :key="deposit.id" class="activity-record">
       <div class="activity-record-heading"><strong><AssetAmount :value="deposit.amount" asset="USDT" /></strong><span class="wallet-status" :class="{ settled: ['credited', 'confirmed', 'swept'].includes(deposit.status) }">{{ statusLabel(deposit.status) }}</span></div><p class="small text-muted">{{ deposit.confirmations }} confirmations</p>
       <p class="text-break">Transaction: {{ deposit.tx_hash }} · Log {{ deposit.log_index }}</p>
@@ -150,19 +155,16 @@ onUnmounted(() => { stopped = true; clearTimeout(timer) })
     </section>
     <section class="card wallet-panel activity-panel">
     <div class="panel-heading"><h2>Withdrawal history</h2><RouterLink to="/wallet/withdraw">Withdraw SIGNET →</RouterLink></div>
-    <p class="small text-muted">SIGNET withdrawals pay 97% to the user. The deducted 3% is converted to USDT for the fee address when fee processing is enabled; its confirmation is shown separately below.</p>
+    <p class="small text-muted">Your withdrawals include a 3% fee. The amount below is the SIGNET sent to your address.</p>
     <p v-if="withdrawalError" class="alert alert-warning" role="alert">{{ withdrawalError }}</p>
-    <p v-if="!withdrawalBusy && !withdrawalError && !withdrawals.length" class="wallet-empty">No withdrawals yet. Track your payouts here once requested.</p>
+    <p v-if="withdrawalsLoaded && !withdrawalBusy && !withdrawalError && !withdrawals.length" class="wallet-empty">No withdrawals yet. Track your payouts here once requested.</p>
     <section v-for="withdrawal in withdrawals" :key="withdrawal.id" class="activity-record">
-      <div class="activity-record-heading"><strong><AssetAmount :value="withdrawal.net_amount" :asset="withdrawal.asset" /></strong><span class="wallet-status" :class="{ settled: withdrawal.status === 'confirmed' }">{{ statusLabel(withdrawal.status) }}</span></div><p class="small">Gross <AssetAmount :value="withdrawal.amount" :asset="withdrawal.asset" /> · Fee <AssetAmount :value="withdrawal.fee" :asset="withdrawal.asset" /></p>
-      <p class="text-break">Destination: {{ withdrawal.to_address }}</p>
-      <p class="text-break mb-0">{{ withdrawal.tx_hash ? `Transaction: ${withdrawal.tx_hash}` : 'No transaction hash recorded yet.' }}</p>
-      <div v-if="withdrawal.fee_payment" class="small mt-2">
-        <p class="mb-1">Fee conversion: {{ statusLabel(withdrawal.fee_payment.status) }} · <AssetAmount :value="withdrawal.fee_payment.signet_amount" asset="SIGNET" /> · <span v-if="withdrawal.fee_payment.received_usdt == null">USDT receipt not confirmed</span><span v-else><AssetAmount :value="withdrawal.fee_payment.received_usdt" asset="USDT" /> received</span></p>
-        <p class="text-break mb-1">Fee destination: {{ withdrawal.fee_payment.to_address }}</p>
-        <p class="text-break mb-0">{{ withdrawal.fee_payment.tx_hash ? `Fee transaction: ${withdrawal.fee_payment.tx_hash}` : 'Fee transaction not submitted yet.' }}</p>
-      </div>
-      <p v-else class="small mt-2 mb-0">No separate fee-conversion record is available for this withdrawal.</p>
+      <div class="activity-record-heading"><strong><AssetAmount :value="withdrawal.net_amount" :asset="withdrawal.asset" /></strong><span class="wallet-status" :class="{ settled: ['confirmed', 'completed'].includes(withdrawal.status) }">{{ statusLabel(withdrawal.status) }}</span></div><p class="small">Gross <AssetAmount :value="withdrawal.amount" :asset="withdrawal.asset" /> · Fee <AssetAmount :value="withdrawal.fee" :asset="withdrawal.asset" /></p>
+      <details><summary>Withdrawal details</summary>
+        <p class="text-break mt-2 mb-1">To: {{ withdrawal.to_address }}</p>
+        <a v-if="/^0x[a-fA-F0-9]{64}$/.test(withdrawal.tx_hash || '')" :href="'https://bscscan.com/tx/' + withdrawal.tx_hash" target="_blank" rel="noopener noreferrer">View transaction ↗</a>
+        <p v-else class="small mb-0">No payout transaction recorded.</p>
+      </details>
     </section>
     <button v-if="withdrawalCursor" class="btn btn-secondary" :disabled="withdrawalBusy || busy" @click="withdrawalHistory(true)">Load older withdrawals</button>
     </section>

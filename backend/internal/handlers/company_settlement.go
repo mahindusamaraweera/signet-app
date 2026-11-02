@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/jmoiron/sqlx"
 	"log"
+	"math/big"
 	"signet-backend/internal/app"
 	"signet-backend/internal/blockchain"
 	"time"
@@ -62,6 +63,28 @@ func syncCompanySettlement(d *app.Deps, id uint64) error {
 	}
 	if state == "confirmed" {
 		return tx.Commit()
+	}
+	// The reviewed legacy production order is already paid in custody. Read its
+	// audited receipt instead of resealing UUID terms or replaying any payout.
+	if d.Cfg != nil && d.Cfg.AppEnv == "production" && intent.UserID == 460 && id == 1 {
+		price, valid := new(big.Rat).SetString(intent.Price)
+		if !valid || price.Cmp(big.NewRat(1000, 1)) != 0 {
+			return fmt.Errorf("legacy settlement source price changed")
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		receipt, err := d.Blockchain.Recovered460CompanyReceipt(ctx)
+		if err != nil {
+			return err
+		}
+		if !*receipt.Settled {
+			return nil
+		}
+		_, err = d.DB.Exec(`UPDATE blockchain_company_settlements SET status='confirmed',manifest_hash=?,updated_at=NOW() WHERE purchase_intent_id=1 AND status IN ('pending','sealed','skipped')`, receipt.ManifestHash)
+		return err
 	}
 	var rows []struct {
 		blockchain.CommissionInstruction
@@ -129,12 +152,14 @@ func syncCompanySettlement(d *app.Deps, id uint64) error {
 // Reclassify only unsubmitted secondary company entries corroborated by a
 // confirmed non-company payout and both original earn logs. Financial credits,
 // payout amounts and transaction identities are never changed by this repair.
+// Legacy tables may have different utf8mb4 collations. Compare textual evidence
+// as exact bytes so matching neither fails on collation nor folds case/accents.
 func classifyLegacyCompanyAccounting(tx *sqlx.Tx, intentID uint64) error {
 	_, err := tx.Exec(`UPDATE blockchain_commission_outbox extra
  JOIN earn_logs company_log ON company_log.id=extra.earn_log_id
  JOIN blockchain_commission_outbox paid ON paid.purchase_intent_id=extra.purchase_intent_id
   AND paid.commission_kind=extra.commission_kind AND paid.commission_usd=extra.commission_usd
-  AND paid.description=extra.description AND paid.beneficiary_user_id<>1
+  AND CAST(paid.description AS BINARY)=CAST(extra.description AS BINARY) AND paid.beneficiary_user_id<>1
  JOIN earn_logs paid_log ON paid_log.id=paid.earn_log_id
  SET extra.status='accounting_only'
  WHERE extra.purchase_intent_id=? AND extra.beneficiary_user_id=1
@@ -142,11 +167,11 @@ func classifyLegacyCompanyAccounting(tx *sqlx.Tx, intentID uint64) error {
   AND extra.description<>'Income cap commission diversion'
   AND extra.remote_payment_id IS NULL AND extra.transfer_tx_hash IS NULL AND extra.signet_amount IS NULL
   AND paid.status='confirmed' AND paid.transfer_tx_hash IS NOT NULL AND paid.transfer_tx_hash<>''
-  AND company_log.user_id='1' AND paid_log.user_id=CAST(paid.beneficiary_user_id AS CHAR)
+  AND CAST(company_log.user_id AS BINARY)=CAST('1' AS BINARY) AND CAST(paid_log.user_id AS BINARY)=CAST(CAST(paid.beneficiary_user_id AS CHAR) AS BINARY)
   AND company_log.id>paid_log.id AND company_log.created_at=paid_log.created_at
   AND CAST(company_log.amount AS DECIMAL(36,18))=extra.commission_usd
   AND CAST(paid_log.amount AS DECIMAL(36,18))=paid.commission_usd
-  AND COALESCE(company_log.description,'')=extra.description
-  AND COALESCE(paid_log.description,'')=paid.description`, intentID)
+  AND CAST(COALESCE(company_log.description,'') AS BINARY)=CAST(extra.description AS BINARY)
+  AND CAST(COALESCE(paid_log.description,'') AS BINARY)=CAST(paid.description AS BINARY)`, intentID)
 	return err
 }

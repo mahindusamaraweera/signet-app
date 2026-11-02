@@ -138,7 +138,7 @@ onUnmounted(() => { clearInterval(tickTimer); clearInterval(refreshTimer) })
       <p v-if="s.recovery_threshold_signet" class="small">Settled commission and reward earnings: <AssetAmount :value="s.qualifying_earned_signet" asset="SIGNET" /> · Recovery threshold: <AssetAmount :value="s.recovery_threshold_signet" asset="SIGNET" />. Withdrawals do not reset earnings; deposits, purchases, bonuses, transfers and vesting releases do not count.</p>
       <dl v-if="!['awaiting_tier', 'recovery_pending', 'recovered'].includes(s.status)" class="vesting-dates"><div><dt>Start date</dt><dd>{{ s.starts_at }}</dd></div><div><dt>Lock ends</dt><dd>{{ s.cliff_ends_at || 'No cliff' }}</dd></div><div><dt>Completion</dt><dd>{{ s.ends_at }}</dd></div></dl>
       <div v-if="!admin && (s.existing_user_switch_available || s.tier_switch_review_available || switchRequests[s.id])" class="mb-3">
-        <p v-if="s.tier_switch_review_available">Only a qualifying linked Tier investment can start vesting. Option 1 releases over 10,000 days. Option 2 waits 2,000 days from purchase, then releases over 7,500 days. Tier eligibility uses invested amounts, excluding Tier bonuses and earnings.</p>
+        <p v-if="s.tier_switch_review_available">Connect your Tier account to check available vesting options. Option 1 releases over 10,000 days from activation. Option 2 waits 2,000 days from your package purchase, then releases over 7,500 days. Qualifying investments include eligible custom stakes and exclude bonuses and earnings.</p>
         <p v-else>You may keep your current historical method or spread the remaining allocation over 10,000 days.</p>
         <button v-if="s.existing_user_switch_available && !switchPreviews[s.id] && !switchRequests[s.id]" class="btn btn-outline-primary" :disabled="busy" @click="previewSwitch(s)">Review 10,000-day switch</button>
         <button v-if="s.tier_switch_review_available && !switchPreviews[s.id] && !switchRequests[s.id]" class="btn btn-outline-primary" :disabled="busy" @click="previewSwitch(s, 'tier')">Check linked Tier eligibility</button>
@@ -148,13 +148,13 @@ onUnmounted(() => { clearInterval(tickTimer); clearInterval(refreshTimer) })
             <div><dt>Qualifying Tier investment</dt><dd><AssetAmount :value="switchPreviews[s.id].eligibility.qualifying_usd" asset="USDT" /></dd></div>
             <div><dt>Investment with 3,000-day duration</dt><dd><AssetAmount :value="switchPreviews[s.id].eligibility.qualifying_3000_day_usd" asset="USDT" /></dd></div>
           </dl>
-          <p v-if="switchPreviews[s.id].eligibility" class="small text-muted">Verified Tier purchase IDs: {{ switchPreviews[s.id].eligibility.purchase_ids?.join(', ') || 'None' }}. Amounts exclude bonuses, earnings and refunded purchases.</p>
+          <p v-if="switchPreviews[s.id].eligibility" class="small text-muted">Verified Tier purchase IDs: {{ switchPreviews[s.id].eligibility.purchase_ids?.join(', ') || 'None' }}. Amounts include custom stakes at their saved purchase-time values and exclude bonuses, earnings and refunded purchases.</p>
           <details v-if="switchPreviews[s.id].eligibility" class="mb-3">
             <summary>Exact investment totals</summary>
             <p class="text-break small">Package price: {{ switchPreviews[s.id].eligibility.package_usd }} USDT<br />Qualifying Tier investment: {{ switchPreviews[s.id].eligibility.qualifying_usd }} USDT<br />Investment with 3,000-day duration: {{ switchPreviews[s.id].eligibility.qualifying_3000_day_usd }} USDT</p>
           </details>
-          <p v-if="switchPreviews[s.id].option === 'option_2'">Option 2: release starts after the 2,000-day wait measured from your package purchase date.</p>
-          <p v-if="switchPreviews[s.id].option === 'option_1'">Option 1: your combined qualifying 3,000-day Tier investments match this package.</p>
+          <p v-if="switchPreviews[s.id].option === 'option_2'">Option 2 is available. Release starts after the 2,000-day wait measured from your package purchase date.</p>
+          <p v-if="switchPreviews[s.id].option === 'option_1'">Option 1 is available. Start vesting on confirmation, with daily releases over 10,000 days.</p>
           <p>Remaining: {{ switchPreviews[s.id].remaining_amount }} SIGNET · Daily: {{ switchPreviews[s.id].daily_release_amount }} SIGNET</p>
           <p>Starts: {{ switchPreviews[s.id].starts_at }} · Ends: {{ switchPreviews[s.id].ends_at }}. Preview expires in five minutes.</p>
           <label><input v-model="switchConsent[s.id]" type="checkbox" :disabled="busy || !!switchRequests[s.id]" /> I accept these dates and daily release terms. Previously released tokens stay unchanged.</label>

@@ -80,7 +80,7 @@ const items = computed(() => {
 	list.push({ to: '/wallet/vesting', label: 'SIGNET Vesting', icon: GRID, wrap: true })
   list.push({ to: '/wallet/tier-link', label: 'Connect Tier Account', icon: GRID, wrap: true })
 	if (r === 'company' || r === 'admin') list.push({ to: '/admin/vesting', label: 'Manage Vesting', icon: GRID, wrap: true })
-  list.push({ to: r !== 'company' ? '/kyc/show' : '/kyc', label: 'KYC', icon: GRID, wrap: true })
+  list.push({ to: '/kyc/show', label: 'Identity verification', icon: GRID, wrap: true })
   return list
 })
 

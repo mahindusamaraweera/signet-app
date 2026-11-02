@@ -13,6 +13,7 @@ import (
 var withdrawalAmountPattern = regexp.MustCompile(`^[0-9]{1,18}(\.[0-9]{1,18})?$`)
 
 type WithdrawalTerms struct {
+	UserUUID        string `json:"user_uuid,omitempty"`
 	UserID          uint64 `json:"user_id"`
 	SecurityVersion uint64 `json:"security_version"`
 	AddressID       string `json:"address_id"`

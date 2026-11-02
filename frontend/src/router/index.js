@@ -69,11 +69,11 @@ const routes = [
   { path: '/my-geneology', name: 'my.geneology', component: () => import('@/views/geneology/GeneologyIndexPage.vue') },
   { path: '/geneology/:userId', name: 'geneology.show', component: () => import('@/views/geneology/GeneologyShowPage.vue'), props: true },
 
-  { path: '/kyc', name: 'kyc.index', component: () => import('@/views/kyc/KycIndexPage.vue') },
+  { path: '/kyc', name: 'kyc.index', redirect: '/kyc/show' },
   { path: '/kyc/show', name: 'kyc.show', component: () => import('@/views/kyc/KycShowPage.vue') },
-  { path: '/kyc/create', name: 'kyc.create', component: () => import('@/views/kyc/KycCreatePage.vue') },
-  { path: '/kyc/:id/edit', name: 'kyc.edit', component: () => import('@/views/kyc/KycEditPage.vue'), props: true },
-  { path: '/kyc/verified', name: 'kyc.verified', component: () => import('@/views/kyc/KycVerifiedPage.vue'), meta: { roles: ['company'] } },
+  { path: '/kyc/create', name: 'kyc.create', redirect: '/kyc/show' },
+  { path: '/kyc/:id/edit', name: 'kyc.edit', redirect: '/kyc/show' },
+  { path: '/kyc/verified', name: 'kyc.verified', redirect: '/kyc/show' },
 
   { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFoundPage.vue'), meta: { public: true } },
 ]

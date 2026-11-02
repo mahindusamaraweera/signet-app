@@ -42,6 +42,9 @@ func (s *Service) BuildWithdrawalCancellation(ctx context.Context, id string, ex
 	if err != nil || status != "cancel_requested" {
 		return WithdrawalAssertion{}, "", ErrWithdrawalAuthorization
 	}
+	if err := s.bindAuthorizationUUID(ctx, tx, &a); err != nil {
+		return WithdrawalAssertion{}, "", err
+	}
 	assertion, signature, err := signWithdrawalCancellation(a, key, now)
 	if err != nil {
 		return WithdrawalAssertion{}, "", err

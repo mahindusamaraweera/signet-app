@@ -21,6 +21,9 @@ func (s *Service) QueueWithdrawal(ctx context.Context, userID uint64, password, 
 	if _, _, err := s.lockWithdrawalState(ctx, tx, expected, password, now); err != nil {
 		return err
 	}
+	if err := assertNoPendingWithdrawal(ctx, tx, userID, id); err != nil {
+		return err
+	}
 	revision, err := s.withdrawalCredentialRevision(ctx, tx, userID)
 	if err != nil {
 		return err

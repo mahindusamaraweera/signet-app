@@ -316,7 +316,8 @@ Legacy secondary company accounting entries are not additional commission
 entitlements. New entries are recorded as `accounting_only`. For pending
 settlements, the worker can reclassify old unsubmitted `requires_reconciliation`
 company rows only when a matching confirmed non-company payout and original
-earn logs corroborate the role, USD amount, description and timestamp. Earn
+earn logs corroborate the role, USD amount, description and timestamp. Textual evidence is compared as exact bytes to support mixed legacy/new table
+collations without altering database defaults. Earn
 logs and wallet/cap balances are preserved. Accounting-only rows are excluded
 from the custody commission manifest; unmatched disputed rows remain blocked.
 Never mark every reconciliation row confirmed or delete payment history to

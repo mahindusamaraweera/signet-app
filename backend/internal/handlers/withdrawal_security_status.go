@@ -33,6 +33,17 @@ func withdrawalSecurityStatusHandler(d *app.Deps) http.HandlerFunc {
 			_, err := d.Cfg.WithdrawalAuthorizationKey()
 			status.CancellationEnabled = err == nil
 		}
+		if status.SubmissionEnabled {
+			if admission, err := d.Blockchain.WithdrawalAdmission(r.Context(), user.ID); err == nil {
+				status.KycRequired = admission.KycRequired != nil && *admission.KycRequired
+				status.KycVerified = admission.KycVerified != nil && *admission.KycVerified
+				status.AdmissionChecked = true
+				status.ActiveWithdrawalID = admission.ActiveWithdrawalID
+				status.CooldownMinutes = *admission.CooldownMinutes
+				status.CooldownUntil = admission.CooldownUntil
+				status.ServerTime = admission.ServerTime
+			}
+		}
 		httpx.JSON(w, 200, status)
 
 	}

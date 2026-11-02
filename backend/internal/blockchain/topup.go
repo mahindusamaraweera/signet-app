@@ -30,13 +30,25 @@ func (g *Gateway) SealTopupManifest(ctx context.Context, intent PurchaseIntent, 
 		Buyer    string `json:"external_user_id"`
 		Purchase string `json:"external_purchase_id"`
 	}
+	var identityBindings interface{}
+	if g.identityResolver != nil {
+		wire, _, err := g.prepareUUIDWire(ctx, map[string]interface{}{"external_user_id": fmt.Sprint(intent.UserID), "commissions": rows})
+		if err != nil {
+			return err
+		}
+		identityBindings = wire["identity_bindings"]
+		encoded, _ := json.Marshal(wire["commissions"])
+		if err := json.Unmarshal(encoded, &rows); err != nil {
+			return err
+		}
+	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i]["external_outbox_id"] < rows[j]["external_outbox_id"] })
 	canonical, err := json.Marshal(rows)
 	if err != nil {
 		return err
 	}
 	expectedHash := fmt.Sprintf("%x", sha256.Sum256(canonical))
-	err = g.request(ctx, "POST", "/api/v1/integration/topups/commission-manifest", fmt.Sprintf("signet-app:topup-manifest:%d", intent.ID), map[string]interface{}{"source": "signet-app", "external_user_id": fmt.Sprint(intent.UserID), "external_purchase_id": fmt.Sprint(intent.ID), "commissions": rows}, &result)
+	err = g.request(ctx, "POST", "/api/v1/integration/topups/commission-manifest", fmt.Sprintf("signet-app:topup-manifest:%d", intent.ID), map[string]interface{}{"source": "signet-app", "external_user_id": fmt.Sprint(intent.UserID), "external_purchase_id": fmt.Sprint(intent.ID), "commissions": rows, "identity_bindings": identityBindings}, &result)
 	if err != nil {
 		return err
 	}

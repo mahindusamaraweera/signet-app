@@ -22,8 +22,8 @@ type WithdrawalReservation struct {
 // A response is not trusted until its owner, amounts and destination exactly
 // match the signed approval. Stable authorization identity survives retries.
 func (g *Gateway) ReserveWithdrawal(ctx context.Context, a withdrawalsecurity.WithdrawalAssertion, signature string) (*WithdrawalReservation, error) {
-	userID, err := strconv.ParseUint(a.ExternalUserID, 10, 64)
-	if err != nil || userID == 0 || strconv.FormatUint(userID, 10) != a.ExternalUserID {
+	userID, err := g.localAssertionOwner(ctx, a.ExternalUserID)
+	if err != nil || userID == 0 {
 		return nil, ErrRejected
 	}
 	version, err := strconv.ParseUint(a.SecurityVersion, 10, 64)

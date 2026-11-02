@@ -18,8 +18,8 @@ type WithdrawalCancellation struct {
 var ErrCancellationReviewRequired = errors.New("withdrawal cancellation requires reconciliation")
 
 func (g *Gateway) CancelWithdrawal(ctx context.Context, a withdrawalsecurity.WithdrawalAssertion, signature string) (*WithdrawalCancellation, error) {
-	owner, err := strconv.ParseUint(a.ExternalUserID, 10, 64)
-	if err != nil || owner == 0 || strconv.FormatUint(owner, 10) != a.ExternalUserID {
+	owner, err := g.localAssertionOwner(ctx, a.ExternalUserID)
+	if err != nil || owner == 0 {
 		return nil, ErrRejected
 	}
 	version, err := strconv.ParseUint(a.SecurityVersion, 10, 64)

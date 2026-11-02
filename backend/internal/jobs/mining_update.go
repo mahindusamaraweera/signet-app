@@ -22,7 +22,7 @@ import (
 //	if newToken >= total_token: newToken = total_token; status = 'inactive'
 func RunMiningUpdate(db *sqlx.DB) error {
 	var ids []uint64
-	if err := db.Select(&ids, "SELECT id FROM user_minings WHERE status = 'active' AND daily_mining > 0"); err != nil {
+	if err := db.Select(&ids, "SELECT id FROM user_minings WHERE status = 'active' AND daily_mining > 0 AND NOT EXISTS (SELECT 1 FROM historical_mining_cutovers c WHERE c.user_id=user_minings.user_id)"); err != nil {
 		return err
 	}
 	for _, id := range ids {
@@ -53,6 +53,6 @@ func miningUpdateRow(db *sqlx.DB, id uint64) error {
 		newStatus = "inactive"
 	}
 
-	_, err := db.Exec("UPDATE user_minings SET mining_token = ?, status = ?, updated_at = NOW() WHERE id = ?", newToken, newStatus, id)
+	_, err := db.Exec("UPDATE user_minings SET mining_token = ?, status = ?, updated_at = NOW() WHERE id = ? AND status='active' AND daily_mining=? AND total_token=? AND NOT EXISTS (SELECT 1 FROM historical_mining_cutovers c WHERE c.user_id=user_minings.user_id)", newToken, newStatus, id, m.DailyMining, m.TotalToken)
 	return err
 }
