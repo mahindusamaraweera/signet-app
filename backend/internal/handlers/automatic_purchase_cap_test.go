@@ -70,6 +70,7 @@ func activationCapFixture() *commissionSQLFixture {
 		{contains: "UPDATE user_parents SET node"},
 		{contains: "UPDATE user_packages SET status='active'"},
 		{contains: "UPDATE users SET status='active'"},
+		{contains: "SELECT current_user_id FROM super_parent_logs", columns: []string{"current_user_id"}, rowValues: [][]driver.Value{}},
 		{contains: "SELECT id FROM users WHERE id=1 FOR UPDATE", columns: []string{"id"}, values: []driver.Value{int64(1)}},
 		{contains: "SELECT id FROM wallets WHERE user_id=1 FOR UPDATE", columns: []string{"id"}, values: []driver.Value{int64(11)}},
 		{contains: "UPDATE wallets SET balance=balance+?", args: []driver.Value{float64(50), int64(11)}},
