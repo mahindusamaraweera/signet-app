@@ -400,13 +400,23 @@ func processPackageActivation(tx *sqlx.Tx, pkg *activatingPackage, actingUserID 
 		}
 	}
 
-	if findUser.Node == "gratitude" {
+	recipient := findUser.VirtualID
+	gratitude := findUser.Node == "gratitude"
+	if len(contexts) > 0 && pkg.Sale == "first" {
+		var err error
+		recipient, err = firstGratitudeRecipient(tx, pkg.UserID, pkg.ID, findUser.Node, findUser.VirtualID)
+		if err != nil {
+			return err
+		}
+		gratitude = recipient != 0
+	}
+	if gratitude {
 		if len(contexts) == 0 {
 			if err := tokenTransferTx(tx, 1, findUser.VirtualID, int64(float64(pkg.PackagePrice)*0.20)); err != nil {
 				return err
 			}
 		}
-		if err := credit(findUser.VirtualID, float64(pkg.PackagePrice)*(20.0/100), "", "gratitude"); err != nil {
+		if err := credit(recipient, float64(pkg.PackagePrice)*(20.0/100), "", "gratitude"); err != nil {
 			return err
 		}
 	}
