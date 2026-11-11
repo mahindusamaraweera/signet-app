@@ -317,10 +317,6 @@ var rankLadder = []rankTier{
 	{"Crown Diamond", 1000000, 10000},
 }
 
-// gratitudeCutoff is the hardcoded date used by rank()'s activeUsersGrant
-// query — preserved verbatim, see financial_engine.md §4.
-var gratitudeCutoff = "2025-11-22"
-
 // teamSalesCutoff is the hardcoded date used by rank()'s
 // totalActivePackagesDirect join — preserved verbatim.
 var teamSalesCutoff = "2025-10-01"
@@ -328,33 +324,12 @@ var teamSalesCutoff = "2025-10-01"
 // Rank ports rank($user_id) from helpers.php, returning structured data
 // instead of a raw HTML string (the Vue frontend renders the badge row
 // itself — see ui_spec.md's "Helper-driven inline widgets" section).
+//
+// Deliberate deviation: the original ranked on a different team total
+// (direct 'active' children with no date cutoff plus gratitude users) than
+// the "Team Sales" it displayed. Owner policy: the team threshold uses the
+// displayed Team Sales, so the badge and the rank always agree.
 func Rank(db *sqlx.DB, userID uint64) (*RankResult, error) {
-	var activeDirect []uint64
-	if err := db.Select(&activeDirect, `SELECT user_id FROM user_parents WHERE virtual_id = ? AND node = 'active'`, userID); err != nil {
-		return nil, err
-	}
-	var activeGrant []uint64
-	if err := db.Select(&activeGrant, `SELECT user_id FROM user_parents WHERE parent_id = ? AND node = 'gratitude' AND DATE(created_at) >= ?`, userID, gratitudeCutoff); err != nil {
-		return nil, err
-	}
-	activeUsers := dedupe(append(append([]uint64{}, activeDirect...), activeGrant...))
-
-	var totalActivePackages float64
-	if len(activeUsers) > 0 {
-		query, args, err := sqlx.In(`
-			SELECT COALESCE(SUM(p.price), 0)
-			FROM user_packages up
-			JOIN packages p ON p.id = CAST(up.package AS UNSIGNED)
-			WHERE up.user_id IN (?) AND up.status = 'active'`, activeUsers)
-		if err != nil {
-			return nil, err
-		}
-		query = db.Rebind(query)
-		if err := db.Get(&totalActivePackages, query, args...); err != nil {
-			return nil, err
-		}
-	}
-
 	var totalActivePackagesDirect float64
 	if err := db.Get(&totalActivePackagesDirect, `
 		SELECT COALESCE(SUM(p.price), 0)
@@ -392,7 +367,7 @@ func Rank(db *sqlx.DB, userID uint64) (*RankResult, error) {
 		CurrentRank:     "No Rank",
 	}
 	for _, tier := range rankLadder {
-		if totalActivePackages >= tier.Team && totalActiveSuperPackages >= tier.Super {
+		if totalActivePackagesDirect >= tier.Team && totalActiveSuperPackages >= tier.Super {
 			result.CurrentRank = tier.Name
 			result.NextRank = nil
 			result.RemainingTeam = 0
@@ -401,23 +376,11 @@ func Rank(db *sqlx.DB, userID uint64) (*RankResult, error) {
 		}
 		next := tier.Name
 		result.NextRank = &next
-		result.RemainingTeam = maxf(tier.Team-totalActivePackages, 0)
+		result.RemainingTeam = maxf(tier.Team-totalActivePackagesDirect, 0)
 		result.RemainingSuper = maxf(tier.Super-totalActiveSuperPackages, 0)
 		break
 	}
 	return result, nil
-}
-
-func dedupe(ids []uint64) []uint64 {
-	seen := map[uint64]bool{}
-	out := make([]uint64, 0, len(ids))
-	for _, id := range ids {
-		if !seen[id] {
-			seen[id] = true
-			out = append(out, id)
-		}
-	}
-	return out
 }
 
 func maxf(a, b float64) float64 {
