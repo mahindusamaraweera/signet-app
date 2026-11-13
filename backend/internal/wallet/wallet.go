@@ -216,6 +216,11 @@ func UpdateWallet(db *sqlx.DB, userID uint64, amount float64, description string
 	return updateWallet(db, userID, amount, description, nil)
 }
 
+// GlobalDirectorShareDescription is the earn_logs.description written for
+// every monthly Global Director Share payout. The GDS Log report filters on
+// it, so it must not change without migrating existing rows.
+const GlobalDirectorShareDescription = "Global Director Share"
+
 // UpdateWalletAt is UpdateWallet with the earn_logs / global_share_wallets_log
 // created_at pinned to logAt instead of NOW(). Used by the monthly Global
 // Director Share job, which pays a completed month a day or so after it ends

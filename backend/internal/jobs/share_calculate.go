@@ -74,7 +74,7 @@ func RunShareCalculate(db *sqlx.DB) error {
 	anyFailed := false
 	for _, u := range users {
 		amount := math.Round(u.GlobalDirectorShare*valuePerShare*100) / 100
-		if err := wallet.UpdateWalletAt(db, u.ID, amount, "Global Director Share", logAt); err != nil {
+		if err := wallet.UpdateWalletAt(db, u.ID, amount, wallet.GlobalDirectorShareDescription, logAt); err != nil {
 			log.Printf("jobs: share:calculate: credit failed for user %d: %v", u.ID, err)
 			anyFailed = true
 			continue
