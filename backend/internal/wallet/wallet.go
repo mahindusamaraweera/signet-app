@@ -10,6 +10,7 @@ package wallet
 import (
 	"database/sql"
 	"math"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -172,7 +173,9 @@ func GlobalShareEligible(tx *sqlx.Tx, userID uint64) (bool, error) {
 // original app. Logs the full walletAmount even when the actual credit was
 // capped — that mismatch is preserved verbatim (see financial_engine.md §1).
 // Users without global_director_share_status = 1 are skipped entirely.
-func creditGlobalShareWallet(tx *sqlx.Tx, userID uint64, walletAmount float64) error {
+// logAt, when non-nil, is written as the log row's created_at (updated_at
+// stays NOW(), the real credit time); nil means NOW() for both.
+func creditGlobalShareWallet(tx *sqlx.Tx, userID uint64, walletAmount float64, logAt *time.Time) error {
 	if eligible, err := GlobalShareEligible(tx, userID); err != nil || !eligible {
 		return err
 	}
@@ -200,7 +203,7 @@ func creditGlobalShareWallet(tx *sqlx.Tx, userID uint64, walletAmount float64) e
 		return err
 	}
 	_, err = tx.Exec(`INSERT INTO global_share_wallets_log (user_id, amount, description, created_at, updated_at)
-		VALUES (?, ?, 'Credited to Global Share Wallet', NOW(), NOW())`, itoa(userID), ftoa(walletAmount))
+		VALUES (?, ?, 'Credited to Global Share Wallet', COALESCE(?, NOW()), NOW())`, itoa(userID), ftoa(walletAmount), logAt)
 	return err
 }
 
@@ -210,6 +213,19 @@ func creditGlobalShareWallet(tx *sqlx.Tx, userID uint64, walletAmount float64) e
 // this is a silent no-op (nothing credited, no log written) — preserved
 // verbatim from the original, see financial_engine.md §1.
 func UpdateWallet(db *sqlx.DB, userID uint64, amount float64, description string) error {
+	return updateWallet(db, userID, amount, description, nil)
+}
+
+// UpdateWalletAt is UpdateWallet with the earn_logs / global_share_wallets_log
+// created_at pinned to logAt instead of NOW(). Used by the monthly Global
+// Director Share job, which pays a completed month a day or so after it ends
+// but must log the payout inside that month. updated_at keeps the real
+// credit time so the backdating is visible in the data.
+func UpdateWalletAt(db *sqlx.DB, userID uint64, amount float64, description string, logAt time.Time) error {
+	return updateWallet(db, userID, amount, description, &logAt)
+}
+
+func updateWallet(db *sqlx.DB, userID uint64, amount float64, description string, logAt *time.Time) error {
 	totalValue, err := activePackagesCapValue(db, userID)
 	if err != nil {
 		return err
@@ -225,11 +241,12 @@ func UpdateWallet(db *sqlx.DB, userID uint64, amount float64, description string
 	if hasWallet && totalValue < currentBalance {
 		return nil // cap reached, no credit — matches WalletService::updateWallet
 	}
-	return creditWallet(db, userID, amount, description)
+	return creditWallet(db, userID, amount, description, logAt)
 }
 
 // creditWallet ports WalletService::creditWallet (private in the original).
-func creditWallet(db *sqlx.DB, userID uint64, amount float64, description string) error {
+// logAt, when non-nil, becomes created_at of the log rows it writes.
+func creditWallet(db *sqlx.DB, userID uint64, amount float64, description string, logAt *time.Time) error {
 	tx, err := db.Beginx()
 	if err != nil {
 		return err
@@ -255,11 +272,11 @@ func creditWallet(db *sqlx.DB, userID uint64, amount float64, description string
 	}
 
 	if _, err := tx.Exec(`INSERT INTO earn_logs (user_id, amount, description, created_at, updated_at)
-		VALUES (?, ?, ?, NOW(), NOW())`, itoa(userID), ftoa(amount), description); err != nil {
+		VALUES (?, ?, ?, COALESCE(?, NOW()), NOW())`, itoa(userID), ftoa(amount), description, logAt); err != nil {
 		return err
 	}
 
-	if err := creditGlobalShareWallet(tx, userID, amount); err != nil {
+	if err := creditGlobalShareWallet(tx, userID, amount, logAt); err != nil {
 		return err
 	}
 
@@ -293,7 +310,7 @@ func creditWallet(db *sqlx.DB, userID uint64, amount float64, description string
 		if _, err := tx.Exec("UPDATE wallets SET balance = balance + ?, updated_at = NOW() WHERE user_id = 1", amount); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO earn_logs (user_id, amount, created_at, updated_at) VALUES ('1', ?, NOW(), NOW())`, ftoa(amount)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO earn_logs (user_id, amount, created_at, updated_at) VALUES ('1', ?, COALESCE(?, NOW()), NOW())`, ftoa(amount), logAt); err != nil {
 			return err
 		}
 	}
@@ -308,7 +325,7 @@ func creditWallet(db *sqlx.DB, userID uint64, amount float64, description string
 // check) — preserved verbatim, see financial_engine.md / api_spec.md §4.
 func TokenControllerCredit(db *sqlx.DB, parentID uint64, packagePrice int64, feePercentage float64, description string) error {
 	walletAmount := float64(packagePrice) * (feePercentage / 100)
-	return creditWallet(db, parentID, walletAmount, description)
+	return creditWallet(db, parentID, walletAmount, description, nil)
 }
 
 // TokenTransfer ports TokenController's private tokenTransfer: moves up to
@@ -404,7 +421,7 @@ func TokenShare(db *sqlx.DB, packageID, virtualParent uint64) error {
 		return err
 	}
 
-	if err := creditGlobalShareWallet(tx, virtualParent, float64(bonusTokens)); err != nil {
+	if err := creditGlobalShareWallet(tx, virtualParent, float64(bonusTokens), nil); err != nil {
 		return err
 	}
 	return tx.Commit()
