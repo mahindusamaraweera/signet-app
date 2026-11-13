@@ -68,11 +68,13 @@ func RunShareCalculate(db *sqlx.DB) error {
 		return err
 	}
 
+	logAt := sharePeriodLogTime(lastMonth)
+
 	succeeded := 0
 	anyFailed := false
 	for _, u := range users {
 		amount := math.Round(u.GlobalDirectorShare*valuePerShare*100) / 100
-		if err := wallet.UpdateWallet(db, u.ID, amount, "Global Director Share"); err != nil {
+		if err := wallet.UpdateWalletAt(db, u.ID, amount, "Global Director Share", logAt); err != nil {
 			log.Printf("jobs: share:calculate: credit failed for user %d: %v", u.ID, err)
 			anyFailed = true
 			continue
@@ -88,4 +90,15 @@ func RunShareCalculate(db *sqlx.DB) error {
 		VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
 		period, totalPool.Float64, totalShares.Float64, valuePerShare, succeeded)
 	return err
+}
+
+// sharePeriodLogTime is the created_at stamped on a period's GDS log rows:
+// the period's last day at 23:59:59 Asia/Colombo, which is when the original
+// month-end cron paid out (e.g. 2026-09-30 18:29 UTC). The job itself runs
+// after the month closes, so without this the payout would be logged in the
+// following month and drop out of that period's date-filtered reports.
+func sharePeriodLogTime(periodStart time.Time) time.Time {
+	colombo := time.FixedZone("Asia/Colombo", 19800)
+	y, m, _ := periodStart.Date()
+	return time.Date(y, m+1, 1, 0, 0, 0, 0, colombo).Add(-time.Second).UTC()
 }
