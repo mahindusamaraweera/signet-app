@@ -13,6 +13,7 @@ import (
 	"signet-backend/internal/auth"
 	"signet-backend/internal/httpx"
 	"signet-backend/internal/models"
+	"signet-backend/internal/wallet"
 )
 
 func RegisterDirectShareRoutes(r chi.Router, d *app.Deps) {
@@ -156,15 +157,20 @@ func directShareLogHandler(d *app.Deps) http.HandlerFunc {
 
 		page, perPage, offset := httpx.PageParams(r, 20)
 
+		// GDS payouts only. global_share_wallets_log can't be used here: every
+		// wallet credit (direct, ROC, gratitude, ...) also writes a row there,
+		// with the same generic description, so it isn't a GDS ledger.
 		var total int
-		_ = d.DB.Get(&total, `SELECT COUNT(*) FROM global_share_wallets_log WHERE DATE(created_at) >= ? AND DATE(created_at) <= ?`, startDate, endDate)
+		_ = d.DB.Get(&total, `SELECT COUNT(*) FROM earn_logs WHERE description = ? AND DATE(created_at) >= ? AND DATE(created_at) <= ?`,
+			wallet.GlobalDirectorShareDescription, startDate, endDate)
 
 		rows, err := d.DB.Queryx(`
-			SELECT gswl.id, gswl.user_id, gswl.amount, gswl.description, gswl.created_at, u.name AS user_name, u.binance_pay_id
-			FROM global_share_wallets_log gswl
-			LEFT JOIN users u ON u.id = CAST(gswl.user_id AS UNSIGNED)
-			WHERE DATE(gswl.created_at) >= ? AND DATE(gswl.created_at) <= ?
-			ORDER BY gswl.created_at DESC LIMIT ? OFFSET ?`, startDate, endDate, perPage, offset)
+			SELECT el.id, el.user_id, el.amount, el.description, el.created_at, u.name AS user_name, u.binance_pay_id
+			FROM earn_logs el
+			LEFT JOIN users u ON u.id = CAST(el.user_id AS UNSIGNED)
+			WHERE el.description = ? AND DATE(el.created_at) >= ? AND DATE(el.created_at) <= ?
+			ORDER BY el.created_at DESC, el.id DESC LIMIT ? OFFSET ?`,
+			wallet.GlobalDirectorShareDescription, startDate, endDate, perPage, offset)
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "Database error")
 			return
