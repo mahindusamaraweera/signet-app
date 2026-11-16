@@ -329,7 +329,9 @@ func buyPackagesHandler(d *app.Deps) http.HandlerFunc {
 // Commercial terms come from the backend so selection screens cannot drift.
 type purchasePackageChoice struct {
 	models.Package
-	Terms *blockchain.PackageTerms `json:"commercial_terms,omitempty"`
+	Terms             *blockchain.PackageTerms `json:"commercial_terms,omitempty"`
+	Unavailable       bool                     `json:"unavailable,omitempty"`
+	UnavailableReason string                   `json:"unavailable_reason,omitempty"`
 }
 
 func purchasePackageChoices(packages []models.Package, blockchainEnabled bool) []purchasePackageChoice {

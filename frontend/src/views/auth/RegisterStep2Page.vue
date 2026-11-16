@@ -34,7 +34,7 @@ const errors = ref({})
 const formError = ref('')
 const submitting = ref(false)
 watch(visiblePackages, choices => {
-  if (selectedPackage.value && !choices.some(p => String(p.id) === String(selectedPackage.value))) selectedPackage.value = ''
+  if (selectedPackage.value && !choices.some(p => String(p.id) === String(selectedPackage.value) && !p.unavailable)) selectedPackage.value = ''
 })
 
 onMounted(async () => {
@@ -98,9 +98,9 @@ async function onSubmit() {
         <p v-if="loading" role="status">Loading available packages…</p>
         <p v-else-if="!visiblePackages.length && !loadError" role="status">No packages are currently available. Please check again later.</p>
         <div class="package-grid">
-          <label v-for="pack in visiblePackages" :key="pack.id" class="package-choice" :class="{ selected: selectedPackage === String(pack.id) }">
-            <input v-model="selectedPackage" type="radio" name="package" :value="String(pack.id)" required />
-            <span><small>{{ pack.name }}</small><strong>{{ usdtDisplay(pack.price) }} <em>USDT</em></strong></span>
+          <label v-for="pack in visiblePackages" :key="pack.id" class="package-choice" :class="{ selected: selectedPackage === String(pack.id), unavailable: pack.unavailable }">
+            <input v-model="selectedPackage" type="radio" name="package" :value="String(pack.id)" :disabled="pack.unavailable" required />
+            <span><small>{{ pack.name }}</small><strong>{{ usdtDisplay(pack.price) }} <em>USDT</em></strong><small v-if="pack.unavailable" class="package-unavailable">{{ pack.unavailable_reason }}</small></span>
           </label>
         </div>
       </fieldset>
@@ -136,6 +136,8 @@ async function onSubmit() {
 .package-summary dl { margin:16px 0; }.package-summary dl>div { display:flex;justify-content:space-between;gap:12px;margin:10px 0; }
 .package-summary dt { font-weight:400;color:var(--sg-muted); }.package-summary dd { margin:0;text-align:right;font-variant-numeric:tabular-nums; }
 .package-summary-total { border-top:1px solid var(--sg-line-3);padding-top:14px;font-weight:700; }
+.package-choice.unavailable { cursor:not-allowed;opacity:.55; }
+.package-choice small.package-unavailable { margin:8px 0 0;color:var(--sg-danger, #ff6b6b); }
 .package-choice:focus-within { outline:2px solid var(--sg-accent-light);outline-offset:3px; }
 @media(max-width:575px) { .package-grid { grid-template-columns:1fr; } }
 </style>
