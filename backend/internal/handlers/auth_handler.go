@@ -395,7 +395,21 @@ func registerStep2FormHandler(d *app.Deps) http.HandlerFunc {
 			httpx.Error(w, 503, "Package catalog temporarily unavailable")
 			return
 		}
-		httpx.OK(w, map[string]interface{}{"status": "success", "id": id, "packages": purchasePackageChoices(packages, d.Cfg.BlockchainEnabled), "blockchain_enabled": d.Cfg.BlockchainEnabled})
+		choices := purchasePackageChoices(packages, d.Cfg.BlockchainEnabled)
+		// Best effort: if the preview fails the package stays selectable and
+		// the submit handler's in-transaction check still blocks it.
+		if newUserID, ok := parseUintParam(id); ok {
+			var referredBy models.NullInt64
+			if err := d.DB.Get(&referredBy, "SELECT referred_by FROM users WHERE id = ?", newUserID); err == nil {
+				gratitude, err := previewRegistrationIsGratitude(d.DB, newUserID, uint64(referredBy.Int64))
+				if err != nil {
+					log.Printf("register step2: gratitude preview for user %d: %v", newUserID, err)
+				} else if gratitude {
+					markGratitudeBlockedPackage(choices)
+				}
+			}
+		}
+		httpx.OK(w, map[string]interface{}{"status": "success", "id": id, "packages": choices, "blockchain_enabled": d.Cfg.BlockchainEnabled})
 	}
 }
 
@@ -473,6 +487,17 @@ func registerStep2SubmitHandler(d *app.Deps) http.HandlerFunc {
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "Could not resolve upline placement")
 			return
+		}
+		if packageID == gratitudeBlockedPackageID {
+			gratitude, err := registrationIsGratitude(tx, newUserID)
+			if err != nil {
+				httpx.Error(w, http.StatusInternalServerError, "Could not resolve upline placement")
+				return
+			}
+			if gratitude {
+				httpx.ValidationError(w, map[string][]string{"package": {gratitudeBlockedPackageMessage}})
+				return
+			}
 		}
 
 		var userparent uint64
