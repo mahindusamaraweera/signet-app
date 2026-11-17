@@ -87,8 +87,11 @@ func TestResetIssuanceDeliveryAndDatabaseBoundaries(t *testing.T) {
 			db := sql.OpenDB(fixture)
 			defer db.Close()
 			err := issuePasswordReset(context.Background(), db, "user@example.com", "https://app.example.com", now, mailer)
-			if (err == nil) != (scenario == "success" || scenario == "unknown email") {
+			if (err == nil) != (scenario == "success") {
 				t.Fatalf("wrong issuance outcome: %v", err)
+			}
+			if errors.Is(err, errPasswordResetUnknownEmail) != (scenario == "unknown email") {
+				t.Fatalf("unknown email not reported distinctly: %v", err)
 			}
 			commit := scenario == "success" || scenario == "mail failure" || scenario == "record failure"
 			if fixture.committed != commit || fixture.rolledBack == commit || len(fixture.steps) != 0 || (mailer.calls == 1) != commit {

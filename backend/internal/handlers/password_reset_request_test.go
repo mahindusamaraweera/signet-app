@@ -35,6 +35,18 @@ func TestPasswordResetRequestDoesNotDiscloseIssuanceOutcome(t *testing.T) {
 	}
 }
 
+func TestPasswordResetRequestReportsUnknownEmail(t *testing.T) {
+	handler := passwordEmailRequestHandler(func(_ *http.Request, _ string) error { return errPasswordResetUnknownEmail })
+	w := httptest.NewRecorder()
+	handler(w, httptest.NewRequest("POST", "/api/v1/password/email", strings.NewReader(`{"email":"abcd@gmail.com"}`)))
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "couldn't find an account") {
+		t.Fatalf("unknown email not reported: %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "success") {
+		t.Fatal("unknown email answered as success")
+	}
+}
+
 func TestPasswordResetRequestRejectsMalformedEmailWithoutIssuing(t *testing.T) {
 	handler := passwordEmailRequestHandler(func(_ *http.Request, _ string) error { t.Fatal("invalid request issued"); return nil })
 	for _, body := range []string{`{"email":"invalid"}`, `{`} {

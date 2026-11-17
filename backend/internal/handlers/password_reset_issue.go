@@ -13,6 +13,12 @@ import (
 	"signet-backend/internal/withdrawalsecurity"
 )
 
+// errPasswordResetUnknownEmail means no account uses the email, so nothing
+// was issued or sent. Owner policy: the reset form tells the user so,
+// accepting that this reveals whether an email is registered (the route is
+// rate limited to 5 requests a minute).
+var errPasswordResetUnknownEmail = errors.New("no account for password reset email")
+
 func issuePasswordReset(ctx context.Context, db *sql.DB, email, baseURL string, now time.Time, mailer withdrawalsecurity.Mailer) error {
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "https" && !(u.Scheme == "http" && net.ParseIP(u.Hostname()) != nil && net.ParseIP(u.Hostname()).IsLoopback())) || mailer == nil {
@@ -34,7 +40,7 @@ func issuePasswordReset(ctx context.Context, db *sql.DB, email, baseURL string, 
 	var userID uint64
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE email=? FOR UPDATE`, email).Scan(&userID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil
+			return errPasswordResetUnknownEmail
 		}
 		return err
 	}
