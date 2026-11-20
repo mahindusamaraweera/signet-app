@@ -20,7 +20,7 @@ func hold486Fixture(saved string, held bool) *commissionSQLFixture {
 		rows = append(rows, []driver.Value{saved})
 	}
 	hash := "0x" + strings.Repeat("f", 64)
-	return &commissionSQLFixture{steps: []commissionSQLStep{
+	f := &commissionSQLFixture{steps: []commissionSQLStep{
 		{contains: "SELECT uuid,status FROM users", columns: []string{"uuid", "status"}, values: []driver.Value{Hold486UUID, us}},
 		{contains: "SELECT user_id,package,status,sale,earn", columns: []string{"user_id", "package", "status", "sale", "earn"}, values: []driver.Value{int64(486), "3", ps, "first", "0"}},
 		{contains: "SELECT COUNT(*) FROM package_purchase_intents", columns: []string{"count"}, values: []driver.Value{int64(1)}},
@@ -34,6 +34,11 @@ func hold486Fixture(saved string, held bool) *commissionSQLFixture {
 		}},
 		{contains: "SELECT evidence FROM placement_correction_holds", columns: []string{"evidence"}, rowValues: rows},
 	}}
+	if saved == "" {
+		f.steps = append(f.steps, correction486PlanSteps()...)
+		f.steps = append(f.steps, commissionSQLStep{contains: "SHOW COLUMNS FROM user_packages", columns: []string{"Field", "Type"}, values: []driver.Value{"status", "enum('pending','active','deactivate')"}})
+	}
+	return f
 }
 func TestHold486DryRunNoWrites(t *testing.T) {
 	f := hold486Fixture("", false)
@@ -47,7 +52,7 @@ func TestHold486DryRunNoWrites(t *testing.T) {
 func TestHold486ExecuteAndRetryOnlyHoldsSource(t *testing.T) {
 	f := hold486Fixture("", false)
 	var evidence string
-	f.steps = append(f.steps, commissionSQLStep{contains: "INSERT INTO placement_correction_holds", checkArgs: func(a []driver.NamedValue) error { evidence = a[1].Value.(string); return nil }}, commissionSQLStep{contains: "UPDATE users SET status='inactive'"}, commissionSQLStep{contains: "UPDATE user_packages SET status='deactive'"})
+	f.steps = append(f.steps, commissionSQLStep{contains: "INSERT INTO placement_correction_holds", checkArgs: func(a []driver.NamedValue) error { evidence = a[1].Value.(string); return nil }}, commissionSQLStep{contains: "UPDATE users SET status='inactive'"}, commissionSQLStep{contains: "UPDATE user_packages SET status=?"})
 	db := sqlx.NewDb(sql.OpenDB(f), "fixture")
 	defer db.Close()
 	r, err := Hold486(db, true, "Approved placement correction for source 486", strings.Repeat("s", 32), time.Now())
@@ -74,5 +79,18 @@ func TestHold486RejectsChangedCommissionAndRollsBackFailedHold(t *testing.T) {
 	defer db.Close()
 	if _, err := Hold486(db, true, "Approved correction", strings.Repeat("s", 32), time.Now()); err == nil || f.committed || !f.rolledBack {
 		t.Fatal("partial hold committed")
+	}
+}
+
+func TestHold486UsesActualInactivePackageEnum(t *testing.T) {
+	for _, variant := range []string{"deactive", "deactivate"} {
+		f := hold486Fixture("", false)
+		f.steps[len(f.steps)-1].values = []driver.Value{"status", "enum('pending','active','" + variant + "')"}
+		db := sqlx.NewDb(sql.OpenDB(f), "fixture")
+		r, err := Hold486(db, false, "", strings.Repeat("s", 32), time.Now())
+		db.Close()
+		if err != nil || r["evidence"].(map[string]interface{})["held_package_status"] != variant {
+			t.Fatalf("enum %s: %v", variant, err)
+		}
 	}
 }

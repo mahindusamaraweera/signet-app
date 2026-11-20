@@ -1,45 +1,27 @@
-# Account 486 placement correction — phase 1 hold
+# Placement correction 486: hold, recover, reconcile
 
-This release ONLY establishes the correction hold and custody reservations.
-It does not recover on-chain commissions, reverse source earnings, change the
-placement, reactivate the sale, or send replacement commissions. Those actions
-require the next recovery/reconciliation stage. Do not report the USD 800 as
-reversed after these commands.
-
-Scope: source user 486 / UUID 1dde762b-4d54-4529-86ff-28b8cee471b4,
+Fixed scope: source user 486 / UUID 1dde762b-4d54-4529-86ff-28b8cee471b4,
 source package 521, source intent 29, custody purchase 59, schedule 5111.
+Buyer investment and 355545.377735458375569300 locked SIGNET are preserved.
+No refund, new allocation, placement edit, reactivation, or replacement commission
+is performed by this tooling. Buyer remains inactive/frozen after recovery.
 
-Source dry run verifies the active identity/package and all six original outbox
-rows (four confirmed payments, two accounting-only rows). Execute atomically
-records the operator reason and previous statuses, makes the source user inactive
-and package deactive, and exports a signed 30-minute proof. It preserves the
-completed purchase, original commissions, placement and all financial history.
-A repeat exports a fresh proof from the SAME held record without another change.
+## Deploy both updates before any execute command
 
-Custody dry run verifies the signed source hold, exact recipient identities,
-confirmed original commission terms, grouped available balances, active owned
-deposit addresses and on-chain amounts. Execute requires an administrator and
-reason. All involved user locks are acquired in ID order. In one transaction:
-- Record administrator approval and four reservation records.
-- Reserve the original SIGNET amounts by debiting available into the ledger's
-  `user_correction_reserve` account (not a treasury payment).
-- Freeze ONLY the buyer and set their awaiting-Tier schedule to `correction_hold`.
-- Preserve the buyer's 355545.377735458375569300 locked SIGNET, original purchase,
-  deposits and all original commission terms and payment hashes.
+Source branch blockchain-automation. Deployment applies embedded migrations 041
+and 042 and installs /opt/signet/backend/hold-486. Native Laravel must apply both
+2026_11_20_000001 and 2026_11_20_000002 migrations. Earlier hold-only release is
+not sufficient. A prior dry run has not changed an account or reserved funds.
 
-The recipients' existing locked vesting is not consumed. Income-cap/earnings
-recovery counters are not reversed at reservation time: the original commissions
-remain settled earnings until actual recovery is confirmed. The corrected sale
-must not be replayed by resetting the original completed intent.
+Source preflight verifies four original confirmed payments and two secondary
+company accounting entries, their exact earnings IDs, original time, custody
+payment IDs, token amounts, recipient UUIDs, current USD wallets and package
+counters. It refuses any unbound global-share credit at the original event time:
+legacy records cannot reliably identify partially capped contributions. Such a
+failure requires a separate attribution audit, not bypassing this guard.
+Source schema inspection selects its actual supported inactive package enum.
 
-## Deploy and run
-
-Deploy signet-app from blockchain-automation through the normal PR pipeline.
-Source migration 041 is applied by the embedded migration runner. Deploy
-signet-token and apply the Laravel migration as below. This release packages
-`hold-486` as a Linux binary; do not compile Go on production.
-
-On Ubuntu:
+### 1. Ubuntu source: dry run, then hold and export proof
 
 ```sh
 cd /opt/signet/backend
@@ -49,25 +31,34 @@ sudo systemd-run --quiet --wait --pipe --collect \
  /opt/signet/backend/hold-486
 ```
 
-Review dry_run. Then establish the source hold (no token transfers):
+Review dry-run accounting plan. No state or balances have changed. Then:
 
 ```sh
 sudo systemd-run --quiet --wait --pipe --collect \
  -p EnvironmentFile=/opt/signet/backend/.env.production \
  -p WorkingDirectory=/opt/signet/backend \
  /opt/signet/backend/hold-486 --execute \
- --reason='Approved hold for account 486 placement correction; recover original commissions before changing placement.' \
+ --reason='Approved correction of account 486 placement; reverse original commissions and keep buyer inactive.' \
  > /opt/signet/backend/placement-486-hold-proof.json
+python3 -m json.tool /opt/signet/backend/placement-486-hold-proof.json > /dev/null
 base64 -w 76 /opt/signet/backend/placement-486-hold-proof.json
 ```
 
-Transfer this proof to Forge using wrapped Base64. On Forge:
+This changes only buyer source status and package status, with a permanent audit
+record and accounting plan. It does NOT debit recipients or send tokens. Completed
+intent, original commission rows, placement, and financial history are retained.
+Repeating execute exports a fresh proof from the same held record. Proofs expire
+in 30 minutes. Do not remove the hold while recovery is incomplete.
+
+### 2. Forge: import proof and reserve funds
+
+Copy proof using wrapped Base64 (avoid unwrapped long terminal JSON):
 
 ```sh
 base64 --decode > /home/forge/placement-486-hold-proof.json
 ```
 
-Paste all Base64 lines, Enter, Ctrl+D. Then:
+Paste all wrapped lines, Enter, Ctrl+D. Then:
 
 ```sh
 cd /home/forge/token.signetcoin.net/current
@@ -77,24 +68,108 @@ php artisan horizon:terminate
 php artisan signet:hold-placement-486 /home/forge/placement-486-hold-proof.json
 ```
 
-Review dry-run reservations and then establish the native hold:
+After reviewing dry run:
 
 ```sh
 php artisan signet:hold-placement-486 /home/forge/placement-486-hold-proof.json \
  --execute --admin-email='signetcoin@gmail.com' \
- --reason='Approved hold for account 486 placement correction; recover original commissions before changing placement.'
+ --reason='Approved correction of account 486 placement; reverse original commissions and keep buyer inactive.'
 ```
 
-Expected status held, funds_sent false, commission_recovered false. Repeating
-same command with a valid proof verifies existing reservations without new
-debits. Expired proofs can be regenerated by repeating the source execute command.
-If a guard fails, leave any existing source hold intact and investigate. Do not
-manually unfreeze, delete records, clear locks or edit reserved balances.
+Expected held, funds_sent false, commission_recovered false. One transaction
+freezes only the buyer, puts schedule 5111 into correction_hold and reserves each
+commission in user_correction_reserve ledger escrow. Other recipients' locked
+vesting is untouched. Available balances are checked in aggregate (377's direct
+and leadership together), and user locks are acquired in ID order. Failures roll
+back all reservations. Repeats verify records without additional debits.
 
-STOP after held. Do not ask the developer to change placement yet. The guarded
-on-chain recovery and source accounting reversal must be implemented, tested,
-executed and confirmed before placement repair and commission reissue.
+### 3. Forge: recover original tokens to treasury
 
-Tests use scripted Go SQL transactions and SQLite Laravel integration tests.
-SQLite fixture monetary columns use TEXT to emulate MySQL DECIMAL string reads;
-this is not a real MySQL concurrency or live-chain test.
+```sh
+php artisan signet:hold-placement-486 --recover
+php artisan signet:hold-placement-486 --recover --execute \
+ --admin-email='signetcoin@gmail.com' \
+ --reason='Approved exact recovery of the four original commissions for placement correction 486.'
+```
+
+Dry run verifies original credits and hold integrity. Actual recovery uses each
+frozen derived wallet and one permanent signer key per commission. It recovers
+an existing completed operation or resumes the SAME prepared/broadcast signed
+transaction. Failed/reverted or unknown states require reconciliation; NEVER
+invent new attempt keys. A new transfer requires unchanged custody/derivation,
+original treasury, asset configuration and sufficient on-chain funds. Exact
+sender debit, treasury receipt, contract, hash and confirmation are verified.
+
+Original amounts:
+- term 77 / source 471 gratitude: 14221.815109418335022772 SIGNET
+- term 78 / source 377 direct: 35554.537773545837556930 SIGNET
+- term 79 / source 377 leadership: 3555.453777354583755693 SIGNET
+- term 80 / source 378 executive: 3555.453777354583755693 SIGNET
+Total: 56887.260437673340091088 SIGNET (original USD 800 entitlement).
+
+If recovering/confirming, repeat the SAME recovery execute command. Each receipt
+settles its existing escrow once; it does not debit available funds again. Only
+confirmed recoveries reduce the settled-earnings counter. Original payment rows
+remain confirmed historical receipts, with separate audited recovery records.
+
+STOP on any error and inspect it. A bad receipt cannot release escrow or create
+completion proof. Partial successes are durable and retries skip them. Do not
+reset status, delete records, unfreeze or manually transfer funds.
+
+### 4. Forge to Ubuntu: finalize source accounting
+
+Only once status is recovered with all four line recoveries confirmed:
+
+```sh
+php artisan signet:hold-placement-486 --export-recovery-proof \
+ > /home/forge/placement-486-recovered.json
+base64 -w 76 /home/forge/placement-486-recovered.json
+```
+
+Copy wrapped Base64 to Ubuntu:
+
+```sh
+base64 --decode > /opt/signet/backend/placement-486-recovered.json
+```
+
+Paste lines, Enter, Ctrl+D, then:
+
+```sh
+cd /opt/signet/backend
+python3 -m json.tool /opt/signet/backend/placement-486-recovered.json > /dev/null
+sudo systemd-run --quiet --wait --pipe --collect \
+ -p EnvironmentFile=/opt/signet/backend/.env.production \
+ -p WorkingDirectory=/opt/signet/backend \
+ /opt/signet/backend/hold-486 \
+ --finalize-proof=/opt/signet/backend/placement-486-recovered.json
+```
+
+Expected recovered, source_accounting_reversed true, buyer_still_held true,
+funds_sent false. This command sends NO blockchain payment. It atomically:
+- Verifies all four distinct signed native recovery receipts, exact amounts and
+  original source identities/history.
+- Reverses source USD wallets: 377=550, 378=50, 471=200; company bookkeeping=550.
+- Offsets first-package earn only for 378=50 and 471=200. 377's two original
+  contributions did not increment that first-package counter, corroborated by
+  the two company overflow rows; do not subtract those counters again.
+- Appends six linked negative earn logs and durable before/after audit evidence.
+- Leaves the completed intent and original payments untouched and buyer held.
+
+Repeating finalization cannot repeat the offsets; a changed receipt hash refuses.
+Expired completion proof can be re-exported on Forge without another recovery.
+
+### 5. Stop for placement review
+
+After native recovery AND source accounting completion, developer may prepare
+placement changes, including the saved gratitude rule for this package and future
+top-ups. Do not simply delete the original gratitude history or reset intent 29.
+Corrected recipients and the no-gratitude replacement manifest need review before
+separate commission reissue and reactivation tooling. These commands deliberately
+leave the buyer's deposit/allocation intact and account held.
+
+## Validation limits
+
+Go SQL transaction/race tests and Laravel SQLite integration tests use mocked
+signer/RPC receipts. SQLite fixture monetary TEXT columns emulate MySQL DECIMAL
+string reads. This is not a live mainnet or real MySQL concurrency test. Source
+preflight and native dry run must pass on current production records.
