@@ -69,6 +69,7 @@ jobs:
           go build -trimpath -ldflags="-s -w" -o ../release/custody-recovery-proof ./cmd/custody-recovery-proof
           go build -trimpath -ldflags="-s -w" -o ../release/historical-mining-cutover ./cmd/historical-mining-cutover
           go build -trimpath -ldflags="-s -w" -o ../release/gratitude-recovery ./cmd/gratitude-recovery
+          go build -trimpath -ldflags="-s -w" -o ../release/hold-486 ./cmd/hold-486
 
       - name: Build frontend
         working-directory: frontend
