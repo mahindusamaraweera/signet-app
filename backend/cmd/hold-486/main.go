@@ -14,6 +14,7 @@ import (
 func main() {
 	execute := flag.Bool("execute", false, "hold fixed account 486 and package 521; no financial transfers")
 	reason := flag.String("reason", "", "operator reason")
+	completion := flag.String("finalize-proof", "", "signed native recovery proof; reverse source accounting once, leave buyer inactive")
 	flag.Parse()
 	c := config.Load()
 	if c.AppEnv != "production" {
@@ -24,7 +25,16 @@ func main() {
 	if err == nil {
 		defer d.Close()
 		var result map[string]interface{}
-		result, err = handlers.Hold486(d, *execute, *reason, c.BlockchainServiceToken, time.Now().UTC())
+		if *completion != "" {
+			raw, e := os.ReadFile(*completion)
+			if e != nil {
+				err = e
+			} else {
+				result, err = handlers.Finalize486(d, raw, c.BlockchainServiceToken, time.Now().UTC())
+			}
+		} else {
+			result, err = handlers.Hold486(d, *execute, *reason, c.BlockchainServiceToken, time.Now().UTC())
+		}
 		if err == nil {
 			err = json.NewEncoder(os.Stdout).Encode(result)
 		}
