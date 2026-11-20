@@ -50,6 +50,8 @@ func TestActivationActiveBuyerCreditsSavedGratitudeOnce(t *testing.T) {
 		if strings.Contains(s.contains, "SELECT current_user_id FROM super_parent_logs") {
 			f.steps[i].rowValues = [][]driver.Value{{int64(132)}}
 			extra := []commissionSQLStep{
+				// The buyer's own row becomes the gratitude record of the sale.
+				{contains: "UPDATE user_parents SET node = 'gratitude'", args: []driver.Value{int64(6)}},
 				{contains: "SELECT id FROM users WHERE id=? FOR UPDATE", columns: []string{"id"}, values: []driver.Value{int64(132)}},
 				{contains: "SELECT balance FROM wallets", columns: []string{"balance"}, values: []driver.Value{float64(0)}},
 				{contains: "SUM(p.price*4)", columns: []string{"cap"}, values: []driver.Value{float64(4000)}},

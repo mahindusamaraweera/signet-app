@@ -730,7 +730,7 @@ func passwordResetHandler(d *app.Deps) http.HandlerFunc {
 // Keep the legacy correction only for the legacy funding flow.
 func correctLegacySignupPlacement(tx *sqlx.Tx, blockchainEnabled bool, referredBy uint64, rootRowID int64, createdIDs *[]uint64) error {
 	if blockchainEnabled {
-		return nil
+		return dropSponsorGratitudeMarker(tx, referredBy, rootRowID, createdIDs)
 	}
 	if referredBy != 0 {
 		var siblings []struct {
@@ -764,5 +764,40 @@ func correctLegacySignupPlacement(tx *sqlx.Tx, blockchainEnabled bool, referredB
 		}
 	}
 
+	return nil
+}
+
+// dropSponsorGratitudeMarker removes the gratitude marker tree.ParentFind
+// inserts for the sponsor on a gratitude sale (user_id = virtual_id =
+// parent_id = sponsor). Left in place it counts toward the sponsor's own
+// active-sale total next to the buyer's row, so one sale counts twice and
+// shifts every later gratitude slot (a sponsor's real 4th sale became a
+// gratitude sale). The buyer's own row stays the single record of the sale
+// and becomes node 'gratitude' when the package activates (see
+// processPackageActivation). The new signup's row (rootRowID) is never
+// touched, so the placement ID archived with the purchase is preserved.
+// Markers created higher up the tree for other uplines are left as they are.
+func dropSponsorGratitudeMarker(tx *sqlx.Tx, referredBy uint64, rootRowID int64, createdIDs *[]uint64) error {
+	if referredBy == 0 {
+		return nil
+	}
+	kept := make([]uint64, 0, len(*createdIDs))
+	for _, id := range *createdIDs {
+		if id != uint64(rootRowID) {
+			res, err := tx.Exec(`DELETE FROM user_parents
+				WHERE id = ? AND node = 'gratitude' AND user_id = ? AND virtual_id = ? AND parent_id = ?`,
+				id, referredBy, referredBy, referredBy)
+			if err != nil {
+				return err
+			}
+			if n, err := res.RowsAffected(); err != nil {
+				return err
+			} else if n == 1 {
+				continue
+			}
+		}
+		kept = append(kept, id)
+	}
+	*createdIDs = kept
 	return nil
 }
