@@ -410,6 +410,14 @@ func processPackageActivation(tx *sqlx.Tx, pkg *activatingPackage, actingUserID 
 		}
 		gratitude = recipient != 0
 	}
+	// The buyer's row is the one record of a gratitude sale (the sponsor's
+	// separate marker row is dropped at signup, see dropSponsorGratitudeMarker),
+	// so mark it here, once the sale is paid and counts toward the sponsor.
+	if gratitude && newNode != "gratitude" {
+		if _, err := tx.Exec("UPDATE user_parents SET node = 'gratitude', updated_at = NOW() WHERE id = ?", findUser.ID); err != nil {
+			return err
+		}
+	}
 	if gratitude {
 		if len(contexts) == 0 {
 			if err := tokenTransferTx(tx, 1, findUser.VirtualID, int64(float64(pkg.PackagePrice)*0.20)); err != nil {
