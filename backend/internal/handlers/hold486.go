@@ -83,12 +83,12 @@ func Hold486(db *sqlx.DB, execute bool, reason, key string, now time.Time) (map[
 		}
 	}
 	var saved []string
-	if err = tx.Select(&saved, "SELECT evidence FROM placement_correction_holds WHERE operation_key=? FOR UPDATE", Hold486Key); err != nil {
+	if err = tx.Select(&saved, "SELECT evidence FROM placement_correction_holds WHERE operation_key=? AND status='held' FOR UPDATE", Hold486Key); err != nil {
 		return nil, err
 	}
 	var evidence map[string]interface{}
 	if len(saved) > 0 {
-		if u.Status != "inactive" || p.Status != "deactive" {
+		if u.Status != "inactive" || p.Status != "deactive" && p.Status != "deactivate" {
 			return nil, fmt.Errorf("source correction hold was removed; reconcile")
 		}
 		if err = json.Unmarshal([]byte(saved[0]), &evidence); err != nil {
@@ -98,7 +98,46 @@ func Hold486(db *sqlx.DB, execute bool, reason, key string, now time.Time) (map[
 		if u.Status != "active" || p.Status != "active" {
 			return nil, fmt.Errorf("expected active account and package")
 		}
+		plan, planErr := correction486AccountingPlan(tx)
+		if planErr != nil {
+			return nil, planErr
+		}
+		var column struct {
+			Type string `db:"Type"`
+		}
+		// MySQL schemas in this deployment use either legacy enum spelling.
+		rows, schemaErr := tx.Queryx("SHOW COLUMNS FROM user_packages LIKE 'status'")
+		if schemaErr != nil {
+			return nil, schemaErr
+		}
+		packageHold := "deactivate"
+		if rows.Next() {
+			values, e := rows.SliceScan()
+			if e != nil {
+				rows.Close()
+				return nil, e
+			}
+			column.Type = fmt.Sprint(values[1])
+			if b, ok := values[1].([]byte); ok {
+				column.Type = string(b)
+			}
+		} else {
+			rows.Close()
+			return nil, fmt.Errorf("package status schema missing")
+		}
+		rows.Close()
+		if strings.HasPrefix(column.Type, "enum(") {
+			if strings.Contains(column.Type, "'deactivate'") {
+				packageHold = "deactivate"
+			} else if strings.Contains(column.Type, "'deactive'") {
+				packageHold = "deactive"
+			} else {
+				return nil, fmt.Errorf("schema has no supported inactive package status")
+			}
+		}
 		evidence = map[string]interface{}{"operation": Hold486Key, "buyer_uuid": Hold486UUID, "source_user": 486, "source_package_id": 521, "source_intent_id": 29, "custody_purchase_id": 59, "reason": strings.TrimSpace(reason), "original_user_status": u.Status, "original_package_status": p.Status, "held_at": now.UTC().Format(time.RFC3339)}
+		evidence["accounting_plan"] = plan
+		evidence["held_package_status"] = packageHold
 		if !execute {
 			return map[string]interface{}{"status": "dry_run", "evidence": evidence, "funds_sent": false}, nil
 		}
@@ -112,7 +151,7 @@ func Hold486(db *sqlx.DB, execute bool, reason, key string, now time.Time) (map[
 		if _, err = tx.Exec("UPDATE users SET status='inactive',updated_at=NOW() WHERE id=486"); err != nil {
 			return nil, err
 		}
-		if _, err = tx.Exec("UPDATE user_packages SET status='deactive',updated_at=NOW() WHERE id=521"); err != nil {
+		if _, err = tx.Exec("UPDATE user_packages SET status=?,updated_at=NOW() WHERE id=521", packageHold); err != nil {
 			return nil, err
 		}
 	}
