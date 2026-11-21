@@ -15,6 +15,8 @@ func main() {
 	execute := flag.Bool("execute", false, "hold fixed account 486 and package 521; no financial transfers")
 	reason := flag.String("reason", "", "operator reason")
 	completion := flag.String("finalize-proof", "", "signed native recovery proof; reverse source accounting once, leave buyer inactive")
+	reissue := flag.Bool("reissue", false, "prepare approved 500/50/50 replacement commissions, no chain transfers")
+	reissueProof := flag.String("reissue-completion", "", "signed replacement completion; activate source and export native release proof")
 	flag.Parse()
 	c := config.Load()
 	if c.AppEnv != "production" {
@@ -25,7 +27,16 @@ func main() {
 	if err == nil {
 		defer d.Close()
 		var result map[string]interface{}
-		if *completion != "" {
+		if *reissueProof != "" {
+			raw, e := os.ReadFile(*reissueProof)
+			if e != nil {
+				err = e
+			} else {
+				result, err = handlers.CompleteReissue486(d, raw, c.BlockchainServiceToken, time.Now().UTC())
+			}
+		} else if *reissue {
+			result, err = handlers.PrepareReissue486(d, *execute, *reason, c.BlockchainServiceToken, time.Now().UTC())
+		} else if *completion != "" {
 			raw, e := os.ReadFile(*completion)
 			if e != nil {
 				err = e
