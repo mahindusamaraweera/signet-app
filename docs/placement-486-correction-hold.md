@@ -163,9 +163,7 @@ Expired completion proof can be re-exported on Forge without another recovery.
 After native recovery AND source accounting completion, developer may prepare
 placement changes, including the saved gratitude rule for this package and future
 top-ups. Do not simply delete the original gratitude history or reset intent 29.
-Corrected recipients and the no-gratitude replacement manifest need review before
-separate commission reissue and reactivation tooling. These commands deliberately
-leave the buyer's deposit/allocation intact and account held.
+The approved replacement plan is now documented in [placement-486-reactivation.md](placement-486-reactivation.md). Follow that separate signed-proof procedure after confirming corrected placement. The hold/recovery commands above deliberately leave the buyer's deposit/allocation intact and account held.
 
 ## Validation limits
 
